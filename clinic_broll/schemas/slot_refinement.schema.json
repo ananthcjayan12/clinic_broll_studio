@@ -4,8 +4,8 @@
   "additionalProperties": false,
   "required": [
     "start", "end", "purpose", "layout_template", "visual_type",
-    "keep_subject_foreground", "panel_region", "still_brief", "motion_brief",
-    "text_overlay", "safety"
+    "keep_subject_foreground", "panel_region", "show_caption", "caption_position",
+    "still_brief", "motion_brief", "text_overlay", "safety"
   ],
   "properties": {
     "start": {"type": "number", "minimum": 0},
@@ -13,11 +13,16 @@
     "purpose": {"type": "string", "maxLength": 500},
     "layout_template": {
       "type": "string",
-      "enum": ["bottom_board", "top_board", "left_panel", "right_panel", "torn_split", "floating_cards", "full_frame"]
+      "enum": [
+        "bottom_board", "top_board", "left_panel", "right_panel",
+        "torn_split", "floating_cards", "full_frame", "broll_only"
+      ]
     },
     "visual_type": {"type": "string", "maxLength": 120},
     "keep_subject_foreground": {"type": "boolean"},
-    "panel_region": {"type": "number", "minimum": 0.25, "maximum": 0.72},
+    "panel_region": {"type": "number", "minimum": 0.25, "maximum": 1.0},
+    "show_caption": {"type": "boolean"},
+    "caption_position": {"type": "string", "enum": ["auto", "top", "bottom"]},
     "still_brief": {"type": "string", "maxLength": 2400},
     "motion_brief": {"type": "string", "maxLength": 1600},
     "text_overlay": {"type": "string", "maxLength": 160},
