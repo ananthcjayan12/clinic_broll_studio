@@ -1,0 +1,13 @@
+Refine this existing slot:
+{slot}
+
+Nearby Malayalam transcript phrases:
+{phrases}
+
+Nearby visual-analysis windows:
+{visual_windows}
+
+Operator instruction:
+{instruction}
+
+Keep the slot inside the source duration. Avoid overlapping another active slot. Use concise English generation briefs while preserving the source Malayalam transcript unchanged.

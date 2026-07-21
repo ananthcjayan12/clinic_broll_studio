@@ -1,0 +1,7 @@
+Review this final production manifest:
+{manifest}
+
+Technical findings:
+{technical_findings}
+
+Flag only actionable issues. Do not invent facts outside the manifest.

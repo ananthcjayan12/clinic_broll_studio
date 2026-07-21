@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "prompt",
+    "negative_constraints",
+    "review_checks"
+  ],
+  "properties": {
+    "prompt": {
+      "type": "string",
+      "maxLength": 4000
+    },
+    "negative_constraints": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 250
+      }
+    },
+    "review_checks": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "string",
+        "maxLength": 250
+      }
+    }
+  }
+}

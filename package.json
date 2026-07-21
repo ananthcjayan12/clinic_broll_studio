@@ -1,0 +1,19 @@
+{
+  "name": "clinic-broll-render-runtime",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Pinned HyperFrames runtime for Clinic B-roll Studio",
+  "scripts": {
+    "doctor": "hyperframes doctor",
+    "preview": "hyperframes preview --port 3002",
+    "render": "hyperframes render",
+    "smoke:render": "python scripts/smoke_render.py"
+  },
+  "dependencies": {
+    "hyperframes": "0.7.62",
+    "gsap": "3.13.0"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

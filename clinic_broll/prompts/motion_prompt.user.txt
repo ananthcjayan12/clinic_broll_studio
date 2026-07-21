@@ -1,0 +1,6 @@
+Create a motion prompt for this approved slot and still:
+{slot}
+
+Approved still path: {still_path}
+Exact timeline duration: {duration:.3f} seconds.
+The final clip will be trimmed locally to the immutable slot. Keep motion gentle enough to loop or freeze safely.

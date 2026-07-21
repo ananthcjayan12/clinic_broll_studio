@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "start", "end", "purpose", "layout_template", "visual_type",
+    "keep_subject_foreground", "panel_region", "still_brief", "motion_brief",
+    "text_overlay", "safety"
+  ],
+  "properties": {
+    "start": {"type": "number", "minimum": 0},
+    "end": {"type": "number", "minimum": 0},
+    "purpose": {"type": "string", "maxLength": 500},
+    "layout_template": {
+      "type": "string",
+      "enum": ["bottom_board", "top_board", "left_panel", "right_panel", "torn_split", "floating_cards", "full_frame"]
+    },
+    "visual_type": {"type": "string", "maxLength": 120},
+    "keep_subject_foreground": {"type": "boolean"},
+    "panel_region": {"type": "number", "minimum": 0.25, "maximum": 0.72},
+    "still_brief": {"type": "string", "maxLength": 2400},
+    "motion_brief": {"type": "string", "maxLength": 1600},
+    "text_overlay": {"type": "string", "maxLength": 160},
+    "safety": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {"type": "string", "maxLength": 300}
+    }
+  }
+}

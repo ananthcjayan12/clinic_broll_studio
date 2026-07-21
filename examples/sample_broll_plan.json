@@ -1,0 +1,32 @@
+{
+  "version": "1.0",
+  "summary": "Example only",
+  "fps": 30,
+  "duration_seconds": 45,
+  "slots": [
+    {
+      "slot_id": "broll_001",
+      "start": 7.2,
+      "end": 11.8,
+      "start_frame": 216,
+      "end_frame": 354,
+      "duration": 4.6,
+      "transcript": "വളരെ force ആയി brush ചെയ്യുമ്പോൾ enamel damage ആകാം.",
+      "purpose": "Show the mechanism of excessive brushing without covering the doctor completely.",
+      "priority": "essential",
+      "layout_template": "bottom_board",
+      "visual_type": "medical_illustration",
+      "keep_subject_foreground": true,
+      "panel_region": 0.44,
+      "still_brief": "Clean macro dental illustration of toothbrush pressure near the gum line.",
+      "motion_brief": "One subtle controlled brushing movement; stable anatomy.",
+      "text_overlay": "BRUSH GENTLY",
+      "safety": ["No blood", "No distorted anatomy", "No generated text"],
+      "status": "suggested",
+      "selected_still": null,
+      "selected_motion": null,
+      "versions": {"stills": [], "motion": []},
+      "review": {"plan": null, "still": null, "motion": null}
+    }
+  ]
+}

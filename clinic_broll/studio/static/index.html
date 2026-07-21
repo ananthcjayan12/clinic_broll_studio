@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Clinic B-roll Studio</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-lockup">
+        <div class="brand-mark">CB</div>
+        <div><strong>Clinic B-roll</strong><span>Production Studio</span></div>
+      </div>
+      <button class="primary full" id="new-run-button">＋ New production</button>
+      <div class="side-label">Productions</div>
+      <div id="run-list" class="run-list"></div>
+      <div class="doctor-card" id="doctor-card">Checking providers…</div>
+    </aside>
+
+    <main class="workspace">
+      <header class="topbar">
+        <div><span class="eyebrow">CONTROLLED VIDEO PIPELINE</span><h1 id="page-title">Start a production</h1></div>
+        <div class="top-actions" id="top-actions"></div>
+      </header>
+      <section id="content"></section>
+    </main>
+  </div>
+
+  <dialog id="create-dialog">
+    <form id="create-form" class="dialog-form">
+      <div class="dialog-head"><div><span class="eyebrow">NEW RUN</span><h2>Upload a talking-head video</h2></div><button type="button" class="icon-button" data-close>×</button></div>
+      <label>Permanent run ID<input name="run_id" required pattern="[a-z0-9][a-z0-9._-]{0,95}" placeholder="clinic-gum-recession-v01" /></label>
+      <label>Video file<input name="video" type="file" accept="video/mp4,video/quicktime,video/webm" required /></label>
+      <div class="field-grid">
+        <label>Media generation<select name="media_provider"><option value="grok_cli">Grok CLI / SuperGrok</option></select></label>
+        <label>Foreground matte<select name="matting_provider"><option value="mediapipe">MediaPipe layered matte</option><option value="none">Disable subject layer</option></select></label>
+      </div>
+      <div class="field-grid">
+        <label>Still candidates<select name="image_candidates_per_slot"><option>1</option><option>2</option></select></label>
+        <label>Output<select name="aspect_ratio"><option value="9:16">Vertical 9:16</option><option value="16:9">Horizontal 16:9</option></select></label>
+      </div>
+      <button class="primary" type="submit">Create controlled run</button>
+      <p class="muted">Creation only stores the upload. Paid steps run only when you start them.</p>
+    </form>
+  </dialog>
+  <div id="toast"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

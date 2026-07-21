@@ -1,0 +1,5 @@
+Create the still-image prompt for this approved slot:
+{slot}
+
+Canvas: {width}x{height}, aspect ratio {aspect_ratio}.
+The subject cutout may remain in front of the panel, so preserve useful negative space in the requested panel region. Do not include written text inside the generated image; UI text is rendered locally.

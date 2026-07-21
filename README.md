@@ -1,0 +1,342 @@
+# Clinic B-roll Studio
+
+A controlled local production system for turning Malayalam dental-clinic talking-head videos into layered social videos with:
+
+- Sarvam Saaras V3 Malayalam/code-mixed transcription;
+- editable B-roll opportunity planning;
+- model routing across Grok CLI, Codex CLI, Claude Code CLI, and Kimi K2.6;
+- Grok Imagine still and image-to-video generation;
+- foreground subject matting so graphic panels can appear behind the doctor;
+- human approval gates before expensive generation;
+- slot-level regeneration and reversible pipeline rewinds;
+- deterministic HTML-to-video rendering with HyperFrames and FFmpeg;
+- a local control-room UI with previews, logs, artifacts, and final MP4 download.
+
+The project is designed around the same production principles as the reference `vcj` repository: immutable source timing, staged execution, cached artifacts, explicit provider routing, targeted repair, manual review gates, and local rendering.
+
+## Why HyperFrames instead of Remotion
+
+This project uses **HyperFrames**.
+
+Both HyperFrames and Remotion ultimately use a browser and FFmpeg, but HyperFrames is the better fit here because:
+
+- the reference project already uses HTML/GSAP-style deterministic browser compositions;
+- the layered effect is naturally represented as ordinary HTML video, transparent video, images, cards, masks, and CSS;
+- no React/bundler layer is required;
+- the generated composition is inspectable as one `index.html` file;
+- the `hf-seek` clock makes local animations frame-accurate;
+- it is Apache-2.0 licensed and intended for agent-authored compositions;
+- it supports a fast browser preview and a deterministic MP4 render from the same artifact.
+
+Remotion remains a good alternative for teams already standardized on React or needing its mature cloud rendering ecosystem. Introducing it here would create a second authoring model without improving the core layered-compositing requirement.
+
+## Production flow
+
+```text
+Upload talking-head video
+        ↓
+1. Normalize source and create proxy/audio
+        ↓
+2. Sarvam Malayalam transcription
+        ↓
+3. Local keyframe, face, motion and coverability analysis
+        ↓
+4. LLM B-roll plan → HUMAN PLAN REVIEW
+        ↓
+5. Foreground subject matte (optional local step)
+        ↓
+6. Generate approved stills with Grok Imagine
+        ↓
+7. Render still-based preview → HUMAN STILL REVIEW
+        ↓
+8. Animate approved stills with Grok Imagine
+        ↓
+9. Render motion preview → HUMAN MOTION REVIEW
+        ↓
+10. Render approved final composition
+        ↓
+11. Technical + semantic QA
+```
+
+The pipeline pauses after stages 4, 7, and 9. It never silently converts every suggestion into paid media.
+
+## Layered visual effect
+
+The professional overlap effect is produced locally from four layers:
+
+```text
+Original talking-head video                      z=1
+Graphic panel + generated B-roll                 z=10–20
+Transparent foreground subject matte             z=30
+Malayalam captions and clinic brand overlays     z=60–70
+```
+
+The original source remains the background. A panel is placed over part of it, and the transparent subject copy is placed above that panel. This avoids reconstructing the entire background and creates the “speaker in front of the B-roll board” look.
+
+## Supported LLM providers
+
+Every reasoning task in the model-routing map can be assigned independently to:
+
+| Provider | Authentication | Typical model |
+|---|---|---|
+| Grok CLI | SuperGrok / Grok Build login | `grok-4.5` or authenticated default |
+| Codex CLI | ChatGPT/Codex login | authenticated default or configured GPT model |
+| Claude Code CLI | Claude Pro/Max or Console login | `sonnet`, `opus`, or full model ID |
+| Kimi API | Moonshot API key | `kimi-k2.6` |
+
+Routing tasks:
+
+- B-roll opportunity analysis
+- Slot refinement, including a per-slot **AI refine** action
+- Still-image visual direction
+- Image-to-video motion direction
+- Semantic/clinical QA
+- Targeted repair advice, automatically invoked when final QA needs repair
+
+**Sarvam is deliberately not part of this routing map.** It remains the dedicated Malayalam ASR provider. Likewise, the media generator is configured separately because text reasoning and image/video generation are different responsibilities.
+
+## Grok media generation
+
+The default media provider is `grok_cli`.
+
+The official Grok Build UI exposes `/imagine` and `/imagine-video`. For headless automation, this repository runs a bounded Grok agent turn with built-in tools enabled, asks it to invoke the relevant Imagine tool exactly once, and then captures:
+
+- media paths returned in streaming JSON;
+- media URLs returned by the tool; or
+- newly created media files under the run/Grok directories.
+
+The raw Grok CLI output is preserved beside each asset. Grok Build is evolving quickly, so the first setup should include a one-image media test. If a CLI revision changes where generated files are stored, update only `clinic_broll/providers/grok_media.py`; the rest of the pipeline remains unchanged.
+
+The production UI intentionally exposes only `grok_cli` for media. An experimental xAI API adapter is left in the provider module as an extension point, but it is not selectable until reference-image upload is configured for image-to-video.
+
+## Installation on macOS
+
+Requirements:
+
+- Python 3.11+
+- Node.js 22+
+- FFmpeg 6+
+- Grok Build CLI for default media generation
+- at least one LLM provider
+- Sarvam API key
+
+Install system tools:
+
+```bash
+brew install python@3.11 node ffmpeg
+```
+
+Create the project environment:
+
+```bash
+cd clinic_broll_studio
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[matting]"
+npm install
+cp .env.example .env
+```
+
+Configure `.env`:
+
+```dotenv
+SARVAM_API_KEY=...
+
+# Optional Kimi route
+MOONSHOT_API_KEY=...
+
+# Experimental API media extension only; not exposed in the production UI
+XAI_API_KEY=...
+```
+
+Authenticate CLI providers you plan to use:
+
+```bash
+grok login
+codex login
+claude
+```
+
+Run diagnostics:
+
+```bash
+clinic-broll doctor
+npm run doctor
+```
+
+Optional zero-provider render smoke test:
+
+```bash
+# Generates a three-second synthetic composition and renders it locally.
+npm run smoke:render
+```
+
+Start the Studio:
+
+```bash
+clinic-broll serve
+```
+
+Open:
+
+```text
+http://127.0.0.1:8765
+```
+
+Alternatively, double-click `run_on_mac.command`.
+
+## Studio workflow
+
+1. Click **New production**.
+2. Upload an MP4/MOV/WebM talking-head video.
+3. Choose Grok CLI media and MediaPipe matte.
+4. Run stage 1.
+5. Run toward QA; the pipeline pauses at the B-roll planning gate.
+6. Review each slot:
+   - approve;
+   - keep talking head;
+   - edit start/end;
+   - change layered template;
+   - edit still and motion briefs.
+7. Continue through still generation and the still preview.
+8. Approve acceptable stills.
+9. Continue through motion generation and motion preview.
+10. Approve motion clips or select **Use still only**.
+11. Render the final MP4 and run QA.
+12. Download the final video from the header.
+
+## Rewinding and regeneration
+
+### Rewind from a stage
+
+The **Rewind from selected** control resets the selected stage and all downstream stages. Existing artifacts are moved into:
+
+```text
+runs/<run-id>/.history/rewind-from-<stage>-<timestamp>/
+```
+
+Nothing is silently deleted.
+
+### Regenerate one asset
+
+Each slot has independent controls for:
+
+- regenerate still;
+- approve/reject still;
+- regenerate motion;
+- approve motion;
+- use still only.
+
+A slot regeneration does not invalidate the transcript, analysis, other slots, or source timing.
+
+### Skip optional stages
+
+The operator can skip:
+
+- subject matte;
+- motion generation;
+- motion preview.
+
+This allows a simpler talking-head + graphic panel video or a still-only final edit.
+
+## Run directory
+
+```text
+runs/<run-id>/
+  studio_run.json
+  studio.log
+  source/
+    upload.mov
+    master.mp4
+    proxy.mp4
+    speech.wav
+    metadata.json
+  transcript/
+    transcript.json
+    captions.srt
+    sarvam-responses.json
+  analysis/
+    visual-analysis.json
+    contact-sheet.jpg
+    keyframes/
+  plan/
+    broll_plan.json
+  matte/
+    foreground.webm
+    report.json
+  prompts/
+  responses/
+  assets/
+    stills/<slot>/<version>/
+    motion/<slot>/<version>/
+  compositions/
+    still/index.html
+    motion/index.html
+    final/index.html
+  previews/
+  renders/final.mp4
+  qa/
+  .history/
+```
+
+## CLI controls
+
+```bash
+# Start UI
+clinic-broll serve
+
+# Check environment
+clinic-broll doctor
+
+# Run one stage
+clinic-broll step clinic-run-v01 3
+
+# Run until a target or review gate
+clinic-broll through clinic-run-v01 11 --confirm-paid
+
+# Rewind safely
+clinic-broll rewind clinic-run-v01 6
+```
+
+## Malayalam transcription design
+
+This repository intentionally uses **Sarvam only** for ASR.
+
+- Model: `saaras:v3`
+- Language: `ml-IN`
+- Mode: `codemix`
+- Audio: one local 16 kHz mono WAV master
+- Default transport: Sarvam Batch STT, which accepts the complete recording
+- Timing: sentence/phrase chunks, sufficient for editorial B-roll placement
+- Short-test fallback: `CBS_SARVAM_TRANSPORT=rest` for clips of 30 seconds or less
+
+The system does not combine multiple ASR services. The goal is accurate concept and phrase timing for B-roll, not legal-grade transcription reconciliation. English dental terms remain in English through `codemix`.
+
+## Medical and identity safeguards
+
+- Never regenerate or alter the doctor’s face.
+- The doctor layer is extracted only from the uploaded video.
+- AI media must not be presented as real patient before/after evidence.
+- Avoid fake radiographs, scans, patient documents, and treatment outcomes.
+- Generated anatomy requires clinical review.
+- Full-frame B-roll is intentionally flagged by QA when it unnecessarily removes eye contact.
+- The original audio and duration remain authoritative.
+
+## Tests
+
+```bash
+python -m pytest
+```
+
+The test suite covers provider routing, plan normalization, rewind/history safety, Sarvam response normalization, Grok media path discovery, and the HyperFrames layered-composition contract.
+
+## Current boundaries
+
+This is a production-capable starter repository, but external services cannot be exercised without your credentials and installed CLIs. In particular:
+
+- run a one-image Grok CLI test after installation;
+- verify MediaPipe hair/hand mattes on Dr. Pooja’s actual framing;
+- review Sarvam accuracy on clinic-specific Malayalam/English dental terms;
+- review every generated medical visual before publishing;
+- keep the local Studio bound to `127.0.0.1` because it can start paid or subscription-backed jobs.

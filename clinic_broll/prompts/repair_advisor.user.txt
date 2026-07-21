@@ -1,0 +1,7 @@
+Measured final QA report:
+{qa_report}
+
+B-roll plan:
+{plan}
+
+Recommend only targeted, minimal repairs. Use slot_id when a repair applies to one slot. Use status=pass only when no repair is required.
