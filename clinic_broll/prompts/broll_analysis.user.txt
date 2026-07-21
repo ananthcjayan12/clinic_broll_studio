@@ -9,4 +9,4 @@ MALAYALAM TRANSCRIPT WITH TIMING
 LOCAL VISUAL WINDOWS
 {visual_analysis}
 
-Create 4-8 meaningful B-roll or layered graphic slots per minute, but use fewer when the doctor should remain visible. Slot boundaries must stay within the supplied duration, should normally be 3-6 seconds, and must not overlap. The panel should usually sit behind the foreground subject matte. Use brief English visual directions even when the transcript is Malayalam. Preserve all medical meaning exactly.
+Create 4-8 meaningful B-roll or layered graphic slots per minute, but use fewer when the doctor should remain visible. Slot boundaries must stay within the supplied duration, should normally be 3-6 seconds, and must not overlap. Use layered boards for supporting information and broll_only for full-screen explanatory footage. Do not keep the subject foreground in broll_only. Malayalam captions are not mandatory; request them only when they add clarity and otherwise set show_caption=false. Use brief English visual directions even when the transcript is Malayalam. Preserve all medical meaning exactly.

@@ -10,4 +10,4 @@ Nearby visual-analysis windows:
 Operator instruction:
 {instruction}
 
-Keep the slot inside the source duration. Avoid overlapping another active slot. Use concise English generation briefs while preserving the source Malayalam transcript unchanged.
+Keep the slot inside the source duration. Avoid overlapping another active slot. Use concise English generation briefs while preserving the source Malayalam transcript unchanged. Return explicit show_caption and caption_position decisions. If selecting broll_only, disable the subject foreground and use the full canvas.

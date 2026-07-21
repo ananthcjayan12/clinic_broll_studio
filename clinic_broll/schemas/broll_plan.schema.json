@@ -1,16 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": [
-    "summary",
-    "slots"
-  ],
+  "required": ["summary", "slots"],
   "additionalProperties": false,
   "properties": {
-    "summary": {
-      "type": "string",
-      "maxLength": 800
-    },
+    "summary": {"type": "string", "maxLength": 800},
     "slots": {
       "type": "array",
       "maxItems": 30,
@@ -18,100 +12,42 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "slot_id",
-          "start",
-          "end",
-          "transcript",
-          "purpose",
-          "priority",
-          "layout_template",
-          "visual_type",
-          "keep_subject_foreground",
-          "panel_region",
-          "still_brief",
-          "motion_brief",
-          "safety"
+          "slot_id", "start", "end", "transcript", "purpose", "priority",
+          "layout_template", "visual_type", "keep_subject_foreground", "panel_region",
+          "show_caption", "caption_position", "still_brief", "motion_brief", "safety"
         ],
         "properties": {
-          "slot_id": {
-            "type": "string",
-            "pattern": "^broll_[0-9]{3}$"
-          },
-          "start": {
-            "type": "number",
-            "minimum": 0
-          },
-          "end": {
-            "type": "number",
-            "exclusiveMinimum": 0
-          },
-          "transcript": {
-            "type": "string",
-            "maxLength": 1000
-          },
-          "purpose": {
-            "type": "string",
-            "maxLength": 500
-          },
-          "priority": {
-            "type": "string",
-            "enum": [
-              "essential",
-              "useful",
-              "optional"
-            ]
-          },
+          "slot_id": {"type": "string", "pattern": "^broll_[0-9]{3}$"},
+          "start": {"type": "number", "minimum": 0},
+          "end": {"type": "number", "exclusiveMinimum": 0},
+          "transcript": {"type": "string", "maxLength": 1000},
+          "purpose": {"type": "string", "maxLength": 500},
+          "priority": {"type": "string", "enum": ["essential", "useful", "optional"]},
           "layout_template": {
             "type": "string",
             "enum": [
-              "bottom_board",
-              "top_board",
-              "left_panel",
-              "right_panel",
-              "torn_split",
-              "floating_cards",
-              "full_frame"
+              "bottom_board", "top_board", "left_panel", "right_panel",
+              "torn_split", "floating_cards", "full_frame", "broll_only"
             ]
           },
           "visual_type": {
             "type": "string",
             "enum": [
-              "medical_illustration",
-              "photoreal_broll",
-              "clinic_asset",
-              "motion_graphic",
-              "text_card",
-              "comparison",
-              "none"
+              "medical_illustration", "photoreal_broll", "clinic_asset",
+              "motion_graphic", "text_card", "comparison", "none"
             ]
           },
-          "keep_subject_foreground": {
-            "type": "boolean"
-          },
-          "panel_region": {
-            "type": "number",
-            "minimum": 0.25,
-            "maximum": 0.72
-          },
-          "still_brief": {
-            "type": "string",
-            "maxLength": 1800
-          },
-          "motion_brief": {
-            "type": "string",
-            "maxLength": 1200
-          },
-          "text_overlay": {
-            "type": "string",
-            "maxLength": 90
-          },
+          "keep_subject_foreground": {"type": "boolean"},
+          "panel_region": {"type": "number", "minimum": 0.25, "maximum": 1.0},
+          "show_caption": {"type": "boolean"},
+          "caption_position": {"type": "string", "enum": ["auto", "top", "bottom"]},
+          "still_brief": {"type": "string", "maxLength": 1800},
+          "motion_brief": {"type": "string", "maxLength": 1200},
+          "text_overlay": {"type": "string", "maxLength": 90},
           "safety": {
             "type": "array",
             "maxItems": 12,
-            "items": {
-              "type": "string",
-              "maxLength": 180
-            }
+            "items": {"type": "string", "maxLength": 180}
           }
         }
       }

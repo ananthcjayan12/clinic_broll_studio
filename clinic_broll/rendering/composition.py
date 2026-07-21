@@ -12,6 +12,7 @@ from ..core.state import load_run
 
 
 FOREGROUND_CHUNK_SECONDS = 2.0
+CAPTION_MODES = {"off", "all", "auto"}
 
 
 def build(
@@ -36,10 +37,6 @@ def build(
     composition = paths.compositions / (composition_name or mode)
     assets = composition / "assets"
     assets.mkdir(parents=True, exist_ok=True)
-    # Preview compositions include the proxy directly. The final composition
-    # is a transparent overlay which FFmpeg later composites over the master;
-    # injecting every full-resolution master frame into Chromium exhausts its
-    # decoded-image cache on modest-memory machines.
     if mode != "final":
         link_or_copy(paths.source / "proxy.mp4", assets / "talking-head.mp4")
     foreground_source = paths.matte / "foreground.webm"
@@ -65,6 +62,10 @@ def build(
             }
         )
 
+    raw_captions_mode = meta["settings"].get("captions_mode")
+    captions_mode = "auto" if raw_captions_mode is None else str(raw_captions_mode)
+    if captions_mode not in CAPTION_MODES:
+        captions_mode = "off"
     manifest = {
         "run_id": run_id,
         "mode": mode,
@@ -74,6 +75,7 @@ def build(
         "duration": duration,
         "timeline_offset": window_start,
         "foreground_available": foreground_available,
+        "captions_mode": captions_mode,
         "slots": rendered_slots,
         "phrases": _items_in_window(transcript.get("phrases") or [], window_start, window_end),
         "captions": _items_in_window(
@@ -115,13 +117,10 @@ def _select_media(run_root: Path, slot: dict[str, Any], mode: str) -> Path | Non
 
     candidates: list[str | None]
     if mode == "still":
-        # Review the newest candidate even when an older accepted still remains selected.
         candidates = [latest("stills"), slot.get("selected_still")]
     elif mode == "motion":
-        # Review the newest motion candidate; fall back to the accepted/current still.
         candidates = [latest("motion"), slot.get("selected_motion"), slot.get("selected_still"), latest("stills")]
     else:
-        # Final output uses only explicitly selected (therefore approved) assets.
         candidates = [slot.get("selected_motion"), slot.get("selected_still")]
 
     for candidate in candidates:
@@ -137,12 +136,6 @@ def _html(manifest: dict[str, Any]) -> str:
     width, height = manifest["width"], manifest["height"]
     duration, fps = manifest["duration"], manifest["fps"]
     slot_markup = "\n".join(_slot_markup(slot) for slot in manifest["slots"])
-    # Keep transparent foreground media bounded to the windows where it is
-    # actually visible. HyperFrames extracts alpha video as full-resolution
-    # RGBA PNG frames; declaring one composition-length clip makes Chromium
-    # retain thousands of injected frames even while CSS opacity is zero.
-    # Source-bounded clip elements omit inactive alpha frames from capture;
-    # data-media-start preserves the immutable source timeline.
     foreground = _foreground_markup(manifest)
     transparent_base = manifest["mode"] == "final"
     master = "" if transparent_base else (
@@ -152,21 +145,24 @@ def _html(manifest: dict[str, Any]) -> str:
     )
     phrases = json.dumps(manifest["phrases"], ensure_ascii=False)
     captions = json.dumps(manifest.get("captions") or manifest["phrases"], ensure_ascii=False)
+    captions_mode = str(manifest.get("captions_mode") or "off")
     slots_json = json.dumps(
         [
             {
-                "id": s["slot_id"],
-                "start": s["start"],
-                "end": s["end"],
-                "layout": s["layout_template"],
-                "foreground": s.get("keep_subject_foreground", True),
+                "id": slot["slot_id"],
+                "start": slot["start"],
+                "end": slot["end"],
+                "layout": slot["layout_template"],
+                "foreground": slot.get("keep_subject_foreground", True),
+                "show_caption": bool(slot.get("show_caption", False)),
+                "caption_position": str(slot.get("caption_position") or "auto"),
                 "foreground_chunks": (
-                    len(_foreground_intervals(s, int(manifest["fps"])))
-                    if manifest["foreground_available"] and s.get("keep_subject_foreground", True)
+                    len(_foreground_intervals(slot, int(manifest["fps"])))
+                    if manifest["foreground_available"] and slot.get("keep_subject_foreground", True)
                     else 0
                 ),
             }
-            for s in manifest["slots"]
+            for slot in manifest["slots"]
         ],
         ensure_ascii=False,
     )
@@ -179,7 +175,7 @@ def _html(manifest: dict[str, Any]) -> str:
 <style>
 :root {--teal:#36d1c4;--navy:#07111f;--panel:#102442;--ink:#f2f8ff;--muted:#a8c0d8}
 *{box-sizing:border-box}
-html,body{margin:0;background:__PAGE_BACKGROUND__;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
+html,body{margin:0;background:__PAGE_BACKGROUND__;color:var(--ink);font-family:Inter,"Noto Sans Malayalam",ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
 #stage{position:relative;width:__WIDTH__px;height:__HEIGHT__px;overflow:hidden;background:__STAGE_BACKGROUND__;transform-origin:top left}
 .track{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #master{z-index:1}
@@ -193,17 +189,25 @@ html,body{margin:0;background:__PAGE_BACKGROUND__;color:var(--ink);font-family:I
 .torn_split .panel{left:0;right:0;bottom:0;height:var(--region);clip-path:polygon(0 8%,7% 3%,15% 9%,24% 2%,35% 8%,44% 3%,56% 9%,65% 2%,76% 8%,88% 3%,100% 9%,100% 100%,0 100%)}
 .floating_cards .panel{right:5%;top:12%;width:54%;height:42%;border-radius:34px}
 .full_frame .panel{inset:0}
+.broll_only .panel{display:none}
 .generated{position:absolute;z-index:2;object-fit:cover;border-radius:24px;box-shadow:0 22px 60px rgba(0,0,0,.38)}
 .bottom_board .generated,.top_board .generated,.torn_split .generated,.generated.bottom_board,.generated.top_board,.generated.torn_split{left:6%;width:88%;height:76%;bottom:6%}
 .top_board .generated,.generated.top_board{top:6%;bottom:auto}
 .left_panel .generated,.generated.left_panel{left:3%;top:12%;width:50%;height:76%}
 .right_panel .generated,.generated.right_panel{right:3%;top:12%;width:50%;height:76%}
 .floating_cards .generated,.generated.floating_cards{right:8%;top:16%;width:48%;height:34%}
-.full_frame .generated,.generated.full_frame{inset:0;width:100%;height:100%;border-radius:0}
+.full_frame .generated,.generated.full_frame,.broll_only .generated,.generated.broll_only{inset:0;width:100%;height:100%;border-radius:0;box-shadow:none}
 .generated-track{z-index:20;opacity:0;pointer-events:none}
 .local-copy{position:absolute;z-index:4;left:7%;right:7%;bottom:5.5%;font-size:48px;line-height:1.05;font-weight:850;text-align:center;text-shadow:0 4px 20px rgba(0,0,0,.65)}
-.foreground{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:30;pointer-events:none}
-.caption{position:absolute;z-index:60;left:7%;right:7%;bottom:7.5%;padding:16px 22px;border-radius:22px;background:rgba(3,10,18,.82);font-weight:800;font-size:42px;line-height:1.22;text-align:center;text-shadow:0 2px 5px #000;opacity:0}
+.top_board .local-copy{top:5.5%;bottom:auto}
+.left_panel .local-copy{left:5%;right:auto;width:47%;bottom:7%}
+.right_panel .local-copy{right:5%;left:auto;width:47%;bottom:7%}
+.floating_cards .local-copy{left:auto;right:8%;width:48%;bottom:47%}
+.broll_only .local-copy{top:7%;bottom:auto;padding:14px 20px;border-radius:18px;background:rgba(2,8,14,.55)}
+.foreground{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:30;pointer-events:none;filter:drop-shadow(0 10px 22px rgba(0,0,0,.24)) drop-shadow(0 0 1px rgba(255,255,255,.16));transform:translateZ(0)}
+.caption{position:absolute;z-index:60;left:7%;right:7%;padding:16px 22px;border-radius:22px;background:rgba(3,10,18,.82);font-weight:800;font-size:42px;line-height:1.22;text-align:center;text-shadow:0 2px 5px #000;opacity:0;transition:none}
+.caption.bottom{bottom:7.5%;top:auto}
+.caption.top{top:8.5%;bottom:auto}
 .brand{position:absolute;z-index:70;top:3.5%;right:4%;padding:10px 16px;border:1px solid rgba(255,255,255,.28);border-radius:999px;background:rgba(5,19,34,.62);font-size:23px;font-weight:800;letter-spacing:.04em}
 </style>
 </head>
@@ -212,19 +216,26 @@ html,body{margin:0;background:__PAGE_BACKGROUND__;color:var(--ink);font-family:I
   __MASTER__
   __SLOTS__
   __FOREGROUND__
-  <div id="caption" class="caption"></div>
+  <div id="caption" class="caption bottom"></div>
   <div class="brand">SMILE CRAFT</div>
 </div>
 <script>
 const DURATION=__DURATION__;
 const PHRASES=__PHRASES__;
 const CAPTIONS=__CAPTIONS__;
+const CAPTION_MODE=__CAPTION_MODE__;
 const SLOTS=__SLOTS_JSON__;
 const stage=document.getElementById('stage');
 const caption=document.getElementById('caption');
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const ease=v=>1-Math.pow(1-clamp(v),3);
+function captionPlacement(slot){
+  if(!slot)return'bottom';
+  if(slot.caption_position==='top'||slot.caption_position==='bottom')return slot.caption_position;
+  return ['bottom_board','torn_split'].includes(slot.layout)?'top':'bottom';
+}
 function renderAt(t){
+  let activeSlot=null;
   for(const slot of SLOTS){
     const el=document.getElementById(slot.id);
     const media=document.getElementById(`${slot.id}-media`);
@@ -232,6 +243,7 @@ function renderAt(t){
     if(!el) continue;
     const active=t>=slot.start && t<slot.end;
     if(!active){el.style.opacity='0';if(media)media.style.opacity='0';for(const fg of foreground)fg.style.opacity='0';continue}
+    activeSlot=slot;
     const d=slot.end-slot.start,p=(t-slot.start)/d;
     const intro=ease(clamp(p/0.13)),outro=ease(clamp((1-p)/0.13));
     const opacity=String(Math.min(intro,outro));
@@ -241,11 +253,17 @@ function renderAt(t){
     const panel=el.querySelector('.panel');
     const y=(1-intro)*80-(1-outro)*30;
     if(panel) panel.style.transform=`translate3d(0,${y}px,0)`;
-    if(media) media.style.transform=`scale(${1.025+0.025*p})`;
+    if(media){
+      const base=['broll_only','full_frame'].includes(slot.layout)?1.005:1.025;
+      const travel=['broll_only','full_frame'].includes(slot.layout)?0.018:0.025;
+      media.style.transform=`scale(${base+travel*p})`;
+    }
   }
   const phrase=CAPTIONS.find(p=>t>=Number(p.start)&&t<Number(p.end));
-  caption.textContent=phrase?phrase.text:'';
-  caption.style.opacity=phrase?'1':'0';
+  const enabled=CAPTION_MODE==='all'||(CAPTION_MODE==='auto'&&Boolean(activeSlot?.show_caption));
+  caption.textContent=enabled&&phrase?phrase.text:'';
+  caption.className=`caption ${captionPlacement(activeSlot)}`;
+  caption.style.opacity=enabled&&phrase?'1':'0';
 }
 window.addEventListener('hf-seek',e=>renderAt(Number(e.detail.time||0)));
 renderAt(0);
@@ -266,6 +284,7 @@ window.__hf_ready__=true;
         "__STAGE_BACKGROUND__": "transparent" if transparent_base else "#081321",
         "__PHRASES__": phrases,
         "__CAPTIONS__": captions,
+        "__CAPTION_MODE__": json.dumps(captions_mode),
         "__SLOTS_JSON__": slots_json,
     }
     for key, value in replacements.items():
@@ -274,14 +293,6 @@ window.__hf_ready__=true;
 
 
 def _foreground_markup(manifest: dict[str, Any], max_chunk_seconds: float = FOREGROUND_CHUNK_SECONDS) -> str:
-    """Author source-aligned alpha clips small enough for Chromium's RGBA cache.
-
-    HyperFrames injects extracted alpha-video frames as full-resolution PNGs.
-    A composition-length media element makes Chromium retain enough decoded
-    RGBA frames to wedge screenshot capture. These clips omit all source frames
-    outside visible slot windows; data-media-start keeps every chunk on the
-    original immutable source clock.
-    """
     if not manifest["foreground_available"]:
         return ""
     markup: list[str] = []
@@ -311,7 +322,6 @@ def _foreground_markup(manifest: dict[str, Any], max_chunk_seconds: float = FORE
 def _foreground_intervals(
     slot: dict[str, Any], fps: int, max_chunk_seconds: float = FOREGROUND_CHUNK_SECONDS
 ) -> list[tuple[float, float]]:
-    """Split a slot at frame-aligned internal boundaries without moving its ends."""
     start = float(slot["start"])
     end = start + float(slot["duration"])
     chunk_count = max(1, math.ceil((end - start) / max_chunk_seconds))
@@ -335,8 +345,6 @@ def _slot_markup(slot: dict[str, Any]) -> str:
     layout = html.escape(str(slot["layout_template"]))
     direct_media = ""
     if slot["media_kind"] == "video":
-        # HyperFrames requires timed media to be a direct stage child. The
-        # panel and the video are sibling clips with the same immutable window.
         media_tag = ""
         direct_media = (
             f'<video id="{slot_id}-media" class="generated generated-track clip {layout}" '
@@ -344,9 +352,6 @@ def _slot_markup(slot: dict[str, Any]) -> str:
             f'style="--region:{region}" src="assets/{source}" muted playsinline preload="auto"></video>'
         )
     else:
-        # The section owns the immutable timeline window. A still image is a
-        # visual child of that timed section and therefore must not register as
-        # a second independent HyperFrames clip.
         media_tag = f'<img id="{slot_id}-media" class="generated" src="assets/{source}" alt="" />'
     copy = html.escape(str(slot.get("text_overlay") or ""))
     copy_markup = f'<div id="{slot_id}-copy" class="local-copy">{copy}</div>' if copy else ""
