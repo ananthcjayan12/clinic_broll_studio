@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import time
+import tomllib
 import urllib.request
 from pathlib import Path
 from typing import Any, Iterable
@@ -72,6 +73,35 @@ def _extract_candidates(output: str, extensions: set[str]) -> list[str]:
     return candidates
 
 
+def _streaming_text(output: str) -> str:
+    """Reassemble tokenized text/thought events from Grok streaming JSON."""
+    chunks: list[str] = []
+    for line in output.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            chunks.append(line)
+            continue
+        if isinstance(event, dict) and event.get("type") in {"text", "thought", "error"}:
+            data = event.get("data")
+            if isinstance(data, str):
+                chunks.append(data)
+    return "".join(chunks)
+
+
+def _zdr_s3_configured() -> bool:
+    config_path = Path.home() / ".grok" / "config.toml"
+    try:
+        config = tomllib.loads(config_path.read_text(encoding="utf-8"))
+        s3 = config["tools"]["zdr_video_output_s3"]
+        credentials = s3["read_write"]
+        return all(s3.get(key) for key in ("bucket", "region", "endpoint")) and all(
+            credentials.get(key) for key in ("access_key_id", "secret_access_key")
+        )
+    except (OSError, KeyError, TypeError, tomllib.TOMLDecodeError):
+        return False
+
+
 def _materialize_candidate(candidate: str, destination: Path) -> bool:
     cleaned = candidate.strip("'\"),.;")
     if cleaned.startswith("http://") or cleaned.startswith("https://"):
@@ -110,7 +140,9 @@ def generate_with_grok_cli(*, prompt: str, destination: Path, media_type: str, c
     full_prompt = (
         f"{tool_rule}\n"
         "Do not edit code and do not create substitute placeholder media. "
-        "Wait for the media task to finish, then return the exact local output path or output URL."
+        "Wait for the media task to finish, then return the exact local output path or output URL. "
+        "If the media tool fails, report that error immediately; do not inspect configuration, credentials, "
+        "source code, environment variables, or other files."
         f"{reference_rule}\n\nCREATIVE BRIEF\n{prompt}"
     )
     command = [
@@ -153,6 +185,22 @@ def generate_with_grok_cli(*, prompt: str, destination: Path, media_type: str, c
         newest = max(new_paths, key=lambda path: path.stat().st_mtime)
         shutil.copy2(newest, destination)
         return _record(destination, "grok_cli", media_type, prompt, reference, str(newest))
+
+    transcript = _streaming_text(combined)
+    if "ZDR" in transcript and "upload_url" in transcript:
+        if _zdr_s3_configured():
+            raise RuntimeError(
+                "Grok CLI omitted output.upload_url even though tools.zdr_video_output_s3 is configured. "
+                "R2 connectivity is valid; this is a Grok CLI 0.2.106 headless image_to_video bug. "
+                "CLI-only video generation cannot proceed under this team's ZDR policy until Grok fixes the "
+                "CLI or the team administrator disables ZDR. The raw CLI output was preserved."
+            )
+        raise RuntimeError(
+            "Grok CLI's Imagine video tool rejected this request because the account uses Zero Data Retention "
+            "and no video output upload destination is configured. Configure tools.zdr_video_output_s3 in "
+            "~/.grok/config.toml, or ask the Grok team administrator to disable ZDR for this team. "
+            "The raw CLI output was preserved."
+        )
 
     raise RuntimeError(
         "Grok completed but no generated media path or URL was found. Run `grok` interactively once and confirm "
@@ -207,8 +255,11 @@ def generate_with_xai_api(*, prompt: str, destination: Path, media_type: str, re
         if check.status_code >= 400:
             raise RuntimeError(f"xAI video polling failed: {check.text[-3000:]}")
         data = check.json()
-        if data.get("status") == "done":
+        status = data.get("status")
+        if status == "done":
             break
+        if status in {"failed", "expired"}:
+            raise RuntimeError(f"xAI video generation {status}: {data}")
         time.sleep(5)
     url = (data.get("video") or {}).get("url")
     if not url:
