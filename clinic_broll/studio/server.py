@@ -294,11 +294,14 @@ def _validate_create_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Settings must be a JSON object")
     media = str(payload.get("media_provider") or "grok_cli")
+    asr = str(payload.get("asr_provider") or "elevenlabs")
     matte = str(payload.get("matting_provider") or "mediapipe")
     aspect = str(payload.get("aspect_ratio") or "9:16")
     candidates = int(payload.get("image_candidates_per_slot") or 1)
     if media not in {"grok_cli"}:
         raise ValueError("Unsupported media provider")
+    if asr != "elevenlabs":
+        raise ValueError("Unsupported transcription provider; ElevenLabs Scribe v2 is required")
     if matte not in {"mediapipe", "none"}:
         raise ValueError("Unsupported matting provider")
     if aspect not in {"9:16", "16:9"}:
@@ -310,7 +313,7 @@ def _validate_create_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if (width, height) != expected:
         raise ValueError(f"{aspect} output must use {expected[0]}x{expected[1]}")
     payload.update({
-        "media_provider": media, "matting_provider": matte, "aspect_ratio": aspect,
+        "asr_provider": asr, "media_provider": media, "matting_provider": matte, "aspect_ratio": aspect,
         "image_candidates_per_slot": candidates, "width": width, "height": height,
         "fps": 30,
     })
@@ -380,5 +383,5 @@ def _doctor_tools() -> dict[str, Any]:
         "ffmpeg": bool(which(FFMPEG) or Path(FFMPEG).exists()),
         "ffprobe": bool(which(FFPROBE) or Path(FFPROBE).exists()),
         "hyperframes": bool(which(HYPERFRAMES) or Path(HYPERFRAMES).exists() or (Path(__file__).resolve().parents[2] / "node_modules" / ".bin" / "hyperframes").exists()),
-        "sarvam": bool(os.getenv("SARVAM_API_KEY") or os.getenv("SARVAM_API_SUBSCRIPTION_KEY")),
+        "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY")),
     }

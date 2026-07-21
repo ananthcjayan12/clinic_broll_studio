@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
+import httpx
 import requests
 
 from ..core.config import FFMPEG, FFPROBE
@@ -12,6 +14,9 @@ from ..core.io import read_json, write_json
 from ..core.usage import UsageTimer, record_usage
 
 SARVAM_URL = "https://api.sarvam.ai/speech-to-text"
+SARVAM_POLL_INTERVAL_SECONDS = 5
+SARVAM_POLL_TIMEOUT_SECONDS = 1800
+SARVAM_POLL_RETRY_DELAYS = (2, 5, 10, 20, 30)
 
 
 def _duration(path: Path) -> float:
@@ -107,10 +112,11 @@ def _batch_transcribe(
         model=model,
         mode=mode,
         language_code=language,
+        with_timestamps=True,
     )
     job.upload_files(file_paths=[str(audio)])
     job.start()
-    job.wait_until_complete(poll_interval=5, timeout=1800)
+    _wait_for_batch_job(job)
     file_results = job.get_file_results()
     failed = list((file_results or {}).get("failed") or [])
     if failed:
@@ -126,6 +132,35 @@ def _batch_transcribe(
     payload = _unwrap_response(raw_responses[0])
     result = _normalise_response(payload, _duration(audio))
     return result, raw_responses, 1
+
+
+def _wait_for_batch_job(job: Any) -> Any:
+    """Poll an existing Batch STT job, tolerating brief network interruptions.
+
+    Retrying only the idempotent status request is important here: recreating the
+    job would upload the same audio again and could duplicate provider usage.
+    """
+    started = time.monotonic()
+    transient_failures = 0
+    while True:
+        if time.monotonic() - started > SARVAM_POLL_TIMEOUT_SECONDS:
+            raise TimeoutError(
+                f"Sarvam Batch STT did not complete within {SARVAM_POLL_TIMEOUT_SECONDS} seconds"
+            )
+        try:
+            status = job.get_status()
+            transient_failures = 0
+        except (httpx.TransportError, requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+            if transient_failures >= len(SARVAM_POLL_RETRY_DELAYS):
+                raise
+            time.sleep(SARVAM_POLL_RETRY_DELAYS[transient_failures])
+            transient_failures += 1
+            continue
+
+        state = str(status.job_state).lower()
+        if state in {"completed", "failed"}:
+            return status
+        time.sleep(SARVAM_POLL_INTERVAL_SECONDS)
 
 
 def _rest_transcribe(

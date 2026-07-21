@@ -7,7 +7,7 @@ from typing import Any
 
 from ..core.io import read_json, write_json
 from ..core.paths import run_paths
-from ..core.state import load_run
+from ..core.state import append_log, load_run
 from ..providers.grok_media import generate_media
 from ..providers.registry import call_task_json
 from .common import load_prompt, load_schema, run_ffmpeg
@@ -48,11 +48,13 @@ def _generate_one(paths, meta: dict[str, Any], slot: dict[str, Any], *, force: b
     system = load_prompt("motion_prompt.system.txt")
     user = load_prompt("motion_prompt.user.txt").format(slot=json.dumps(slot, ensure_ascii=False, indent=2), still_path=still_path, duration=float(slot["duration"]))
     schema = load_schema("media_prompt.schema.json")
+    append_log(paths, f"Motion {slot['slot_id']} {version_id}: requesting motion direction from {selection['provider']}")
     prompt_payload = call_task_json(task="motion_prompt", selection=selection, system=system, user=user, cwd=paths.root, output_schema=schema)
     full_prompt = _merge_prompt(prompt_payload, float(slot["duration"]))
     prompt_path = paths.prompts / "motion" / slot["slot_id"] / f"{version_id}.json"
     response_path = paths.responses / "motion" / slot["slot_id"] / f"{version_id}.json"
     write_json(prompt_path, {"selection": selection, "slot": slot["slot_id"], **prompt_payload})
+    append_log(paths, f"Motion {slot['slot_id']} {version_id}: generating image-to-video media")
     record = generate_media(
         provider=meta["settings"].get("media_provider", "grok_cli"),
         prompt=full_prompt,
@@ -64,9 +66,10 @@ def _generate_one(paths, meta: dict[str, Any], slot: dict[str, Any], *, force: b
         aspect_ratio=meta["settings"].get("aspect_ratio", "9:16"),
     )
     _normalize_motion(
-        raw, destination, float(slot["duration"]), int(meta["settings"].get("fps", 30)),
+        paths, raw, destination, float(slot["duration"]), int(meta["settings"].get("fps", 30)),
         int(meta["settings"].get("width", 1080)), int(meta["settings"].get("height", 1920)),
     )
+    append_log(paths, f"Motion {slot['slot_id']} {version_id}: provider output received and normalized")
     record.update({"path": str(destination), "version": version_id})
     write_json(response_path, record)
     relative = destination.relative_to(paths.root).as_posix()
@@ -80,11 +83,11 @@ def _merge_prompt(payload: dict[str, Any], duration: float) -> str:
     return f"{payload['prompt']}\n\nTarget duration: {duration:.2f} seconds.\nSTRICT NEGATIVE CONSTRAINTS\n{constraints}\nNo text, morphing, new teeth, new instruments, or camera whip."
 
 
-def _normalize_motion(raw: Path, destination: Path, duration: float, fps: int, width: int, height: int) -> None:
+def _normalize_motion(paths, raw: Path, destination: Path, duration: float, fps: int, width: int, height: int) -> None:
     # The immutable timeline belongs to the local compositor, not the generator.
     # Loop or trim the provider result to the exact slot duration.
     run_ffmpeg([
         "-stream_loop", "-1", "-i", str(raw), "-t", f"{duration:.6f}",
         "-vf", f"fps={fps},scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
         "-an", "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(destination),
-    ])
+    ], paths=paths, label=f"Normalize motion {destination.parents[1].name}", duration=duration)

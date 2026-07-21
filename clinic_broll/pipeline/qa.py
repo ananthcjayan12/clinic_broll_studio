@@ -6,13 +6,14 @@ from typing import Any
 
 from ..core.io import read_json, write_json
 from ..core.paths import run_paths
-from ..core.state import load_run
+from ..core.state import append_log, load_run
 from ..providers.registry import call_task_json
 from .common import ffprobe, load_prompt, load_schema
 
 
 def run(run_id: str) -> dict[str, Any]:
     paths = run_paths(run_id)
+    append_log(paths, "Final QA: inspecting streams, duration, and selected assets")
     meta = load_run(run_id)
     final = paths.renders / "final.mp4"
     if not final.exists():
@@ -54,6 +55,7 @@ def run(run_id: str) -> dict[str, Any]:
     )
     schema = load_schema("qa.schema.json")
     try:
+        append_log(paths, f"Final QA: requesting semantic review from {selection['provider']} ({selection['model']})")
         semantic = call_task_json(task="semantic_qa", selection=selection, system=system, user=user, cwd=paths.root, output_schema=schema)
     except Exception as exc:
         semantic = {"status": "needs_review", "summary": f"Automated semantic QA unavailable: {exc}", "findings": []}
@@ -83,6 +85,7 @@ def run(run_id: str) -> dict[str, Any]:
         write_json(paths.qa / "repair-advice.json", repair_advice)
 
     report = {"status": overall, "technical": technical, "semantic": semantic, "repair_advice": repair_advice}
+    append_log(paths, f"Final QA: completed with status {overall}")
     write_json(paths.qa / "final-report.json", report)
     artifacts = ["qa/technical.json", "qa/semantic.json", "qa/final-report.json"]
     if repair_advice is not None:

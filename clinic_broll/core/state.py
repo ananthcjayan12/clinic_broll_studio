@@ -86,7 +86,7 @@ def create_run(
         "height": DEFAULT_HEIGHT,
         "fps": DEFAULT_FPS,
         "aspect_ratio": "9:16",
-        "sarvam_mode": "codemix",
+        "asr_provider": "elevenlabs",
         "matting_provider": "mediapipe",
         "media_provider": "grok_cli",
         "image_candidates_per_slot": 1,

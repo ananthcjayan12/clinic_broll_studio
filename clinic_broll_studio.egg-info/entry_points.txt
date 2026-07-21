@@ -1,0 +1,2 @@
+[console_scripts]
+clinic-broll = clinic_broll.cli:main

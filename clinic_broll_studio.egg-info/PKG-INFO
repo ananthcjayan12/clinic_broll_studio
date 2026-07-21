@@ -1,8 +1,33 @@
+Metadata-Version: 2.4
+Name: clinic-broll-studio
+Version: 0.1.0
+Summary: Controlled Malayalam talking-head to layered B-roll video production studio
+Author: Clinic B-roll Studio
+License: MIT
+Requires-Python: >=3.11
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: fastapi<1,>=0.115
+Requires-Dist: uvicorn[standard]<1,>=0.30
+Requires-Dist: python-multipart>=0.0.9
+Requires-Dist: requests<3,>=2.32
+Requires-Dist: sarvamai<0.2,>=0.1.28
+Requires-Dist: jsonschema<5,>=4.23
+Requires-Dist: numpy<3,>=1.26
+Requires-Dist: opencv-python<5,>=4.10
+Requires-Dist: Pillow<12,>=10.4
+Provides-Extra: matting
+Requires-Dist: mediapipe<0.11,>=0.10.14; extra == "matting"
+Provides-Extra: dev
+Requires-Dist: pytest<10,>=8.3; extra == "dev"
+Requires-Dist: ruff<1,>=0.8; extra == "dev"
+Dynamic: license-file
+
 # Clinic B-roll Studio
 
 A controlled local production system for turning Malayalam dental-clinic talking-head videos into layered social videos with:
 
-- ElevenLabs Scribe v2 Malayalam/code-mixed transcription with word timestamps;
+- Sarvam Saaras V3 Malayalam/code-mixed transcription;
 - editable B-roll opportunity planning;
 - model routing across Grok CLI, Codex CLI, Claude Code CLI, and Kimi K2.6;
 - Grok Imagine still and image-to-video generation;
@@ -37,7 +62,7 @@ Upload talking-head video
         ↓
 1. Normalize source and create proxy/audio
         ↓
-2. ElevenLabs Scribe v2 Malayalam transcription
+2. Sarvam Malayalam transcription
         ↓
 3. Local keyframe, face, motion and coverability analysis
         ↓
@@ -93,7 +118,7 @@ Routing tasks:
 - Semantic/clinical QA
 - Targeted repair advice, automatically invoked when final QA needs repair
 
-**Scribe v2 is deliberately not part of the reasoning routing map.** It is the dedicated Malayalam ASR provider. There is no automatic ASR fallback. Likewise, the media generator is configured separately because text reasoning and image/video generation are different responsibilities.
+**Sarvam is deliberately not part of this routing map.** It remains the dedicated Malayalam ASR provider. Likewise, the media generator is configured separately because text reasoning and image/video generation are different responsibilities.
 
 ## Grok media generation
 
@@ -118,7 +143,7 @@ Requirements:
 - FFmpeg 6+
 - Grok Build CLI for default media generation
 - at least one LLM provider
-- ElevenLabs API key
+- Sarvam API key
 
 Install system tools:
 
@@ -141,7 +166,7 @@ cp .env.example .env
 Configure `.env`:
 
 ```dotenv
-ELEVENLABS_API_KEY=...
+SARVAM_API_KEY=...
 
 # Optional Kimi route
 MOONSHOT_API_KEY=...
@@ -255,7 +280,7 @@ runs/<run-id>/
   transcript/
     transcript.json
     captions.srt
-    elevenlabs-response.json
+    sarvam-responses.json
   analysis/
     visual-analysis.json
     contact-sheet.jpg
@@ -301,16 +326,17 @@ clinic-broll rewind clinic-run-v01 6
 
 ## Malayalam transcription design
 
-This repository intentionally uses **ElevenLabs Scribe v2 only** for ASR. Missing credentials, API errors, or missing word timestamps fail the stage explicitly; there is no fallback.
+This repository intentionally uses **Sarvam only** for ASR.
 
-- Model: `scribe_v2`
-- Language: `mal`
-- Timing: word-level timestamps grouped into short editorial phrases
+- Model: `saaras:v3`
+- Language: `ml-IN`
+- Mode: `codemix`
 - Audio: one local 16 kHz mono WAV master
-- Transport: ElevenLabs batch Speech-to-Text API
-- Phrase grouping: punctuation, speech pauses, and a six-second maximum
+- Default transport: Sarvam Batch STT, which accepts the complete recording
+- Timing: sentence/phrase chunks, sufficient for editorial B-roll placement
+- Short-test fallback: `CBS_SARVAM_TRANSPORT=rest` for clips of 30 seconds or less
 
-The system does not combine multiple ASR services. Exact word boundaries drive captions, while deterministic short phrase groups drive B-roll planning.
+The system does not combine multiple ASR services. The goal is accurate concept and phrase timing for B-roll, not legal-grade transcription reconciliation. English dental terms remain in English through `codemix`.
 
 ## Medical and identity safeguards
 
@@ -328,7 +354,7 @@ The system does not combine multiple ASR services. Exact word boundaries drive c
 python -m pytest
 ```
 
-The test suite covers provider routing, plan normalization, rewind/history safety, Scribe word normalization, Grok media path discovery, and the HyperFrames layered-composition contract.
+The test suite covers provider routing, plan normalization, rewind/history safety, Sarvam response normalization, Grok media path discovery, and the HyperFrames layered-composition contract.
 
 ## Current boundaries
 
@@ -336,6 +362,6 @@ This is a production-capable starter repository, but external services cannot be
 
 - run a one-image Grok CLI test after installation;
 - verify MediaPipe hair/hand mattes on Dr. Pooja’s actual framing;
-- review Scribe accuracy on clinic-specific Malayalam/English dental terms;
+- review Sarvam accuracy on clinic-specific Malayalam/English dental terms;
 - review every generated medical visual before publishing;
 - keep the local Studio bound to `127.0.0.1` because it can start paid or subscription-backed jobs.

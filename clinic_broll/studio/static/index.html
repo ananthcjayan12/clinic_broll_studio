@@ -34,6 +34,7 @@
       <label>Permanent run ID<input name="run_id" required pattern="[a-z0-9][a-z0-9._-]{0,95}" placeholder="clinic-gum-recession-v01" /></label>
       <label>Video file<input name="video" type="file" accept="video/mp4,video/quicktime,video/webm" required /></label>
       <div class="field-grid">
+        <label>Transcription<select name="asr_provider"><option value="elevenlabs">ElevenLabs Scribe v2</option></select></label>
         <label>Media generation<select name="media_provider"><option value="grok_cli">Grok CLI / SuperGrok</option></select></label>
         <label>Foreground matte<select name="matting_provider"><option value="mediapipe">MediaPipe layered matte</option><option value="none">Disable subject layer</option></select></label>
       </div>

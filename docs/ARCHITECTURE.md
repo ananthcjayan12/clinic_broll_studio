@@ -36,11 +36,11 @@ Long operations run in a separate process. The Studio stays responsive and can t
 
 All text providers implement the same `TextProvider` interface. Schema validation is local.
 
-### Sarvam adapter
+### ElevenLabs Scribe adapter
 
-`providers/sarvam.py`
+`providers/elevenlabs_stt.py`, behind `providers/asr.py`
 
-The complete 16 kHz mono source audio is submitted through Sarvam Batch STT using Saaras V3, `ml-IN`, and `codemix`. The short synchronous REST route remains an opt-in test path for clips no longer than 30 seconds.
+The complete 16 kHz mono source audio is submitted to Scribe v2 with Malayalam (`mal`) and word-level timestamps. Timed words are deterministically grouped into short editorial phrases. The shared ASR boundary is strict and has no fallback.
 
 ### Grok media adapter
 

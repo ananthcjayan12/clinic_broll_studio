@@ -6,7 +6,7 @@ from typing import Any
 
 from ..core.io import read_json, write_json
 from ..core.paths import run_paths
-from ..core.state import load_run
+from ..core.state import append_log, load_run
 from ..providers.registry import call_task_json
 from .common import load_prompt, load_schema
 
@@ -35,15 +35,19 @@ def run(run_id: str) -> dict[str, Any]:
     (prompt_dir / "broll-analysis.txt").write_text(f"SYSTEM\n{system}\n\nUSER\n{user}", encoding="utf-8")
     schema = load_schema("broll_plan.schema.json")
     try:
+        append_log(paths, f"B-roll planning: requesting plan from {selection['provider']} ({selection['model']})")
         payload = call_task_json(task="broll_analysis", selection=selection, system=system, user=user, cwd=paths.root, output_schema=schema)
+        append_log(paths, "B-roll planning: provider response received; validating timeline slots")
         write_json(response_dir / "broll-analysis.json", payload)
     except Exception as exc:
         # A deterministic fallback keeps the Studio operable when a subscription
         # provider is temporarily unavailable. It is clearly recorded for review.
         payload = _fallback_plan(transcript, visual_analysis)
+        append_log(paths, f"B-roll planning: provider unavailable; using deterministic fallback ({exc})")
         write_json(response_dir / "broll-analysis-fallback.json", {"error": str(exc), "payload": payload})
     plan = normalize_plan(payload, float(transcript.get("duration_seconds") or 0), fps=int(meta["settings"].get("fps", 30)))
     write_json(paths.plan / "broll_plan.json", plan)
+    append_log(paths, f"B-roll planning: saved {len(plan['slots'])} proposed slots for human review")
     return {"artifacts": ["plan/broll_plan.json", "prompts/planning/", "responses/planning/"], "summary": {"slots": len(plan["slots"]), "summary": plan.get("summary")}}
 
 

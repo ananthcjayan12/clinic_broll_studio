@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "description": "Pinned HyperFrames runtime for Clinic B-roll Studio",
   "scripts": {
+    "postinstall": "python3 scripts/patch_hyperframes.py",
     "doctor": "hyperframes doctor",
     "preview": "hyperframes preview --port 3002",
     "render": "hyperframes render",

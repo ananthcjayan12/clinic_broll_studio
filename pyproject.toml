@@ -43,6 +43,7 @@ target-version = "py311"
 
 [tool.setuptools.package-data]
 clinic_broll = [
+  "models/*.tflite",
   "prompts/*.txt",
   "schemas/*.json",
   "studio/static/*",

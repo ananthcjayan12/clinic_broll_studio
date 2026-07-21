@@ -83,7 +83,7 @@ def _doctor() -> None:
             shutil.which("hyperframes")
             or (str(PROJECT_ROOT / "node_modules" / ".bin" / "hyperframes") if (PROJECT_ROOT / "node_modules" / ".bin" / "hyperframes").exists() else None)
         ),
-        "sarvam_key": bool(os.getenv("SARVAM_API_KEY") or os.getenv("SARVAM_API_SUBSCRIPTION_KEY")),
+        "elevenlabs_key": bool(os.getenv("ELEVENLABS_API_KEY")),
     }
     try:
         import mediapipe  # noqa: F401

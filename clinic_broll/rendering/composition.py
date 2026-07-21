@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import html
 import json
+import math
 from pathlib import Path
 from typing import Any
 
 from ..core.io import link_or_copy, read_json, write_json
 from ..core.paths import run_paths
 from ..core.state import load_run
+
+
+FOREGROUND_CHUNK_SECONDS = 2.0
 
 
 def build(run_id: str, mode: str) -> Path:
@@ -54,6 +58,7 @@ def build(run_id: str, mode: str) -> Path:
         "foreground_available": foreground_available,
         "slots": rendered_slots,
         "phrases": transcript.get("phrases") or [],
+        "captions": transcript.get("captions") or transcript.get("phrases") or [],
     }
     write_json(composition / "composition-manifest.json", manifest)
     (composition / "index.html").write_text(_html(manifest), encoding="utf-8")
@@ -89,13 +94,15 @@ def _html(manifest: dict[str, Any]) -> str:
     width, height = manifest["width"], manifest["height"]
     duration, fps = manifest["duration"], manifest["fps"]
     slot_markup = "\n".join(_slot_markup(slot) for slot in manifest["slots"])
-    foreground = (
-        f'<video id="foreground" class="foreground clip" data-start="0" data-duration="{duration:.6f}" '
-        'data-track-index="40" src="assets/foreground.webm" muted playsinline></video>'
-        if manifest["foreground_available"]
-        else ""
-    )
+    # Keep transparent foreground media bounded to the windows where it is
+    # actually visible. HyperFrames extracts alpha video as full-resolution
+    # RGBA PNG frames; declaring one composition-length clip makes Chromium
+    # retain thousands of injected frames even while CSS opacity is zero.
+    # Source-bounded clip elements omit inactive alpha frames from capture;
+    # data-media-start preserves the immutable source timeline.
+    foreground = _foreground_markup(manifest)
     phrases = json.dumps(manifest["phrases"], ensure_ascii=False)
+    captions = json.dumps(manifest.get("captions") or manifest["phrases"], ensure_ascii=False)
     slots_json = json.dumps(
         [
             {
@@ -104,6 +111,11 @@ def _html(manifest: dict[str, Any]) -> str:
                 "end": s["end"],
                 "layout": s["layout_template"],
                 "foreground": s.get("keep_subject_foreground", True),
+                "foreground_chunks": (
+                    len(_foreground_intervals(s, int(manifest["fps"])))
+                    if manifest["foreground_available"] and s.get("keep_subject_foreground", True)
+                    else 0
+                ),
             }
             for s in manifest["slots"]
         ],
@@ -157,33 +169,32 @@ html,body{margin:0;background:#02070d;color:var(--ink);font-family:Inter,ui-sans
 <script>
 const DURATION=__DURATION__;
 const PHRASES=__PHRASES__;
+const CAPTIONS=__CAPTIONS__;
 const SLOTS=__SLOTS_JSON__;
 const stage=document.getElementById('stage');
-const foreground=document.getElementById('foreground');
 const caption=document.getElementById('caption');
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
 const ease=v=>1-Math.pow(1-clamp(v),3);
 function renderAt(t){
-  let needForeground=false;
   for(const slot of SLOTS){
     const el=document.getElementById(slot.id);
     const media=document.getElementById(`${slot.id}-media`);
+    const foreground=Array.from({length:slot.foreground_chunks||0},(_,i)=>document.getElementById(slot.id+'-foreground-'+String(i+1).padStart(2,'0'))).filter(Boolean);
     if(!el) continue;
     const active=t>=slot.start && t<slot.end;
-    if(!active){el.style.opacity='0';if(media)media.style.opacity='0';continue}
-    if(slot.foreground) needForeground=true;
+    if(!active){el.style.opacity='0';if(media)media.style.opacity='0';for(const fg of foreground)fg.style.opacity='0';continue}
     const d=slot.end-slot.start,p=(t-slot.start)/d;
     const intro=ease(clamp(p/0.13)),outro=ease(clamp((1-p)/0.13));
     const opacity=String(Math.min(intro,outro));
     el.style.opacity=opacity;
     if(media)media.style.opacity=opacity;
+    for(const fg of foreground)fg.style.opacity=opacity;
     const panel=el.querySelector('.panel');
     const y=(1-intro)*80-(1-outro)*30;
     if(panel) panel.style.transform=`translate3d(0,${y}px,0)`;
     if(media) media.style.transform=`scale(${1.025+0.025*p})`;
   }
-  if(foreground) foreground.style.opacity=needForeground?'1':'0';
-  const phrase=PHRASES.find(p=>t>=Number(p.start)&&t<Number(p.end));
+  const phrase=CAPTIONS.find(p=>t>=Number(p.start)&&t<Number(p.end));
   caption.textContent=phrase?phrase.text:'';
   caption.style.opacity=phrase?'1':'0';
 }
@@ -202,11 +213,64 @@ window.__hf_ready__=true;
         "__SLOTS__": slot_markup,
         "__FOREGROUND__": foreground,
         "__PHRASES__": phrases,
+        "__CAPTIONS__": captions,
         "__SLOTS_JSON__": slots_json,
     }
     for key, value in replacements.items():
         template = template.replace(key, value)
     return template
+
+
+def _foreground_markup(manifest: dict[str, Any], max_chunk_seconds: float = FOREGROUND_CHUNK_SECONDS) -> str:
+    """Author source-aligned alpha clips small enough for Chromium's RGBA cache.
+
+    HyperFrames injects extracted alpha-video frames as full-resolution PNGs.
+    A composition-length media element makes Chromium retain enough decoded
+    RGBA frames to wedge screenshot capture. These clips omit all source frames
+    outside visible slot windows; data-media-start keeps every chunk on the
+    original immutable source clock.
+    """
+    if not manifest["foreground_available"]:
+        return ""
+    markup: list[str] = []
+    fps = int(manifest["fps"])
+    for slot in manifest["slots"]:
+        if not slot.get("keep_subject_foreground", True):
+            continue
+        slot_id = str(slot["slot_id"])
+        for index, (chunk_start, chunk_end) in enumerate(
+            _foreground_intervals(slot, fps, max_chunk_seconds)
+        ):
+            chunk_start = round(chunk_start, 6)
+            chunk_end = round(chunk_end, 6)
+            chunk_duration = chunk_end - chunk_start
+            markup.append(
+                f'<video id="{html.escape(slot_id)}-foreground-{index + 1:02d}" class="foreground clip" '
+                f'data-foreground-slot="{html.escape(slot_id)}" '
+                f'data-start="{chunk_start:.6f}" data-duration="{chunk_duration:.6f}" '
+                f'data-media-start="{chunk_start:.6f}" data-track-index="40" '
+                'src="assets/foreground.webm" muted playsinline></video>'
+            )
+    return "\n".join(markup)
+
+
+def _foreground_intervals(
+    slot: dict[str, Any], fps: int, max_chunk_seconds: float = FOREGROUND_CHUNK_SECONDS
+) -> list[tuple[float, float]]:
+    """Split a slot at frame-aligned internal boundaries without moving its ends."""
+    start = float(slot["start"])
+    end = start + float(slot["duration"])
+    chunk_count = max(1, math.ceil((end - start) / max_chunk_seconds))
+    boundaries = [start]
+    for index in range(1, chunk_count):
+        target = start + (end - start) * index / chunk_count
+        boundary = round(target * fps) / fps
+        if boundary <= boundaries[-1]:
+            boundary = boundaries[-1] + 1 / fps
+        if boundary < end:
+            boundaries.append(boundary)
+    boundaries.append(end)
+    return list(zip(boundaries, boundaries[1:]))
 
 
 def _slot_markup(slot: dict[str, Any]) -> str:

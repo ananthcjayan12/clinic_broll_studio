@@ -10,6 +10,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from ..core.io import read_json, write_json
 from ..core.paths import run_paths
+from ..core.state import append_log
 
 
 def _face_detector():
@@ -29,6 +30,8 @@ def run(run_id: str) -> dict[str, Any]:
     fps = float(capture.get(cv2.CAP_PROP_FPS) or 30)
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
     sample_interval = max(1, round(fps * 1.5))
+    expected_samples = max(1, math.ceil(frame_count / sample_interval))
+    append_log(paths, f"Visual analysis: scanning {frame_count} frames at 1.5 second intervals (~{expected_samples} samples)")
     keyframes_dir = paths.analysis / "keyframes"
     keyframes_dir.mkdir(parents=True, exist_ok=True)
     detector = _face_detector()
@@ -78,6 +81,8 @@ def run(run_id: str) -> dict[str, Any]:
             "keyframe": f"analysis/keyframes/{name}",
         }
         samples.append(sample)
+        if len(samples) % 5 == 0 or len(samples) == expected_samples:
+            append_log(paths, f"Visual analysis: processed {len(samples)}/{expected_samples} samples")
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         thumb = Image.fromarray(rgb).resize((270, 480))
         contact_images.append((thumb, f"{timestamp:05.1f}s  layer {layer_suitability:.2f}"))
@@ -106,6 +111,7 @@ def run(run_id: str) -> dict[str, Any]:
         "recommendation": "Prefer layered panels when layer_suitability is high; avoid full-frame cover when talking_head_value is high.",
     }
     write_json(paths.analysis / "visual-analysis.json", report)
+    append_log(paths, "Visual analysis: building contact sheet and saving timing windows")
     _contact_sheet(contact_images, paths.analysis / "contact-sheet.jpg")
     return {"artifacts": ["analysis/visual-analysis.json", "analysis/contact-sheet.jpg", "analysis/keyframes/"], "summary": {"samples": len(samples), "duration_seconds": duration}}
 

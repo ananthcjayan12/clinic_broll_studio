@@ -9,7 +9,7 @@ from PIL import Image
 
 from ..core.io import read_json, write_json
 from ..core.paths import run_paths
-from ..core.state import load_run
+from ..core.state import append_log, load_run
 from ..providers.grok_media import generate_media
 from ..providers.registry import call_task_json
 from .common import load_prompt, load_schema
@@ -54,11 +54,13 @@ def _generate_one(paths, meta: dict[str, Any], plan: dict[str, Any], slot: dict[
         aspect_ratio=meta["settings"]["aspect_ratio"],
     )
     schema = load_schema("media_prompt.schema.json")
+    append_log(paths, f"Still {slot['slot_id']} {version_id}: requesting visual direction from {selection['provider']}")
     prompt_payload = call_task_json(task="image_prompt", selection=selection, system=system, user=user, cwd=paths.root, output_schema=schema)
     full_prompt = _merge_prompt(prompt_payload)
     prompt_path = paths.prompts / "stills" / slot["slot_id"] / f"{version_id}.json"
     response_path = paths.responses / "stills" / slot["slot_id"] / f"{version_id}.json"
     write_json(prompt_path, {"selection": selection, "slot": slot["slot_id"], **prompt_payload})
+    append_log(paths, f"Still {slot['slot_id']} {version_id}: generating image with {meta['settings'].get('media_provider', 'grok_cli')}")
     record = generate_media(
         provider=meta["settings"].get("media_provider", "grok_cli"),
         prompt=full_prompt,
@@ -68,6 +70,7 @@ def _generate_one(paths, meta: dict[str, Any], plan: dict[str, Any], slot: dict[
         aspect_ratio=meta["settings"].get("aspect_ratio", "9:16"),
     )
     _normalize_png(destination)
+    append_log(paths, f"Still {slot['slot_id']} {version_id}: image received and normalized")
     record["path"] = str(destination)
     record["version"] = version_id
     write_json(response_path, record)

@@ -10,3 +10,4 @@ runs/
 *.log
 !runs/
 !runs/.gitkeep
+/runs
