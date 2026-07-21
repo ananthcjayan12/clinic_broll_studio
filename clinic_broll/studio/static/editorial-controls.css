@@ -1,0 +1,4 @@
+.check-field{display:flex!important;align-items:center;gap:9px;min-height:42px;padding:8px 10px;border:1px solid #29425a;border-radius:10px;background:#071522;color:#c4d5e4!important}
+.check-field input{width:18px!important;height:18px;margin:0;accent-color:var(--teal);flex:0 0 auto}
+.check-field:has(input:disabled){opacity:.55}
+.slot-fields select:disabled,.slot-fields input:disabled{opacity:.55;cursor:not-allowed}
