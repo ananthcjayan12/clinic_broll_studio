@@ -39,9 +39,7 @@ STAGES: tuple[Stage, ...] = (
 STAGE_BY_NUMBER = {item.number: item for item in STAGES}
 STAGE_BY_KEY = {item.key: item for item in STAGES}
 
-# Only directories wholly owned by one stage appear here. Shared assets are cleaned more selectively.
 STAGE_OUTPUTS: dict[int, tuple[str, ...]] = {
-    # Preserve source/upload.* so stage 1 can be rerun after a rewind.
     1: ("source/master.mp4", "source/proxy.mp4", "source/speech.wav", "source/metadata.json"),
     2: ("transcript",),
     3: ("analysis",),
@@ -90,6 +88,10 @@ def create_run(
         "matting_provider": "mediapipe",
         "media_provider": "grok_cli",
         "image_candidates_per_slot": 1,
+        "captions_mode": "off",
+        "matte_feather_px": 4,
+        "matte_temporal_blend": 0.12,
+        "matte_decontamination_strength": 0.72,
         "render_quality": "high",
         "task_models": DEFAULT_MODEL_MAP,
     }
@@ -97,7 +99,7 @@ def create_run(
         resolved.update(settings)
     resolved["task_models"] = validate_model_map(resolved.get("task_models"))
     meta = {
-        "version": "1.0",
+        "version": "1.1",
         "run_id": run_id,
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -177,13 +179,11 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
         write_json(history_root / "broll_plan.before.json", plan)
 
     for number in range(from_stage, max(STAGE_BY_NUMBER) + 1):
-        for relative in STAGE_OUTPUTS.get(number, ()):  # preserve prior versions rather than deleting
+        for relative in STAGE_OUTPUTS.get(number, ()):
             safe_move_to_history(paths.root / relative, history_root / f"stage-{number:02d}")
         record = stage_record(meta, number)
         record.update({"status": "pending", "started_at": None, "completed_at": None, "error": None, "artifacts": []})
 
-    # Keep the editorial plan when rewinding downstream stages, but remove stale
-    # references to versioned assets that were moved to history.
     if plan and from_stage > 4:
         for slot in plan.get("slots", []):
             if from_stage <= 6:
