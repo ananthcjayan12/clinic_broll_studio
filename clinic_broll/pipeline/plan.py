@@ -11,7 +11,17 @@ from ..providers.registry import call_task_json
 from .common import load_prompt, load_schema
 
 
-LAYOUTS = {"bottom_board", "top_board", "left_panel", "right_panel", "torn_split", "floating_cards", "full_frame"}
+LAYOUTS = {
+    "bottom_board",
+    "top_board",
+    "left_panel",
+    "right_panel",
+    "torn_split",
+    "floating_cards",
+    "full_frame",
+    "broll_only",
+}
+CAPTION_POSITIONS = {"auto", "top", "bottom"}
 
 
 def run(run_id: str) -> dict[str, Any]:
@@ -40,8 +50,6 @@ def run(run_id: str) -> dict[str, Any]:
         append_log(paths, "B-roll planning: provider response received; validating timeline slots")
         write_json(response_dir / "broll-analysis.json", payload)
     except Exception as exc:
-        # A deterministic fallback keeps the Studio operable when a subscription
-        # provider is temporarily unavailable. It is clearly recorded for review.
         payload = _fallback_plan(transcript, visual_analysis)
         append_log(paths, f"B-roll planning: provider unavailable; using deterministic fallback ({exc})")
         write_json(response_dir / "broll-analysis-fallback.json", {"error": str(exc), "payload": payload})
@@ -69,6 +77,10 @@ def normalize_plan(payload: dict[str, Any], duration: float, *, fps: int = 30) -
         layout = str(raw.get("layout_template") or "bottom_board")
         if layout not in LAYOUTS:
             layout = "bottom_board"
+        broll_only = layout == "broll_only"
+        caption_position = str(raw.get("caption_position") or "auto")
+        if caption_position not in CAPTION_POSITIONS:
+            caption_position = "auto"
         slot = {
             "slot_id": slot_id,
             "start": round(start, 3),
@@ -81,8 +93,10 @@ def normalize_plan(payload: dict[str, Any], duration: float, *, fps: int = 30) -
             "priority": raw.get("priority") if raw.get("priority") in {"essential", "useful", "optional"} else "useful",
             "layout_template": layout,
             "visual_type": str(raw.get("visual_type") or "medical_illustration"),
-            "keep_subject_foreground": bool(raw.get("keep_subject_foreground", layout != "full_frame")),
-            "panel_region": max(0.25, min(float(raw.get("panel_region", 0.44)), 0.72)),
+            "keep_subject_foreground": False if broll_only else bool(raw.get("keep_subject_foreground", layout != "full_frame")),
+            "panel_region": 1.0 if broll_only else max(0.25, min(float(raw.get("panel_region", 0.44)), 0.72)),
+            "show_caption": bool(raw.get("show_caption", False)),
+            "caption_position": caption_position,
             "still_brief": str(raw.get("still_brief") or raw.get("purpose") or "").strip(),
             "motion_brief": str(raw.get("motion_brief") or "Subtle stable motion only").strip(),
             "text_overlay": str(raw.get("text_overlay") or "").strip(),
@@ -95,7 +109,7 @@ def normalize_plan(payload: dict[str, Any], duration: float, *, fps: int = 30) -
         }
         slots.append(slot)
         previous_end = end
-    return {"version": "1.0", "summary": str(payload.get("summary") or "B-roll plan"), "fps": fps, "duration_seconds": duration, "slots": slots}
+    return {"version": "1.1", "summary": str(payload.get("summary") or "B-roll plan"), "fps": fps, "duration_seconds": duration, "slots": slots}
 
 
 def update_slot(run_id: str, slot_id: str, updates: dict[str, Any]) -> dict[str, Any]:
@@ -108,7 +122,7 @@ def update_slot(run_id: str, slot_id: str, updates: dict[str, Any]) -> dict[str,
         raise KeyError(slot_id)
     allowed = {
         "start", "end", "purpose", "layout_template", "visual_type", "keep_subject_foreground",
-        "panel_region", "still_brief", "motion_brief", "text_overlay", "safety",
+        "panel_region", "show_caption", "caption_position", "still_brief", "motion_brief", "text_overlay", "safety",
     }
     for key, value in updates.items():
         if key in allowed:
@@ -124,7 +138,15 @@ def update_slot(run_id: str, slot_id: str, updates: dict[str, Any]) -> dict[str,
         raise ValueError("A B-roll slot must be at least 0.5 seconds")
     if slot.get("layout_template") not in LAYOUTS:
         raise ValueError("Unknown layout template")
-    slot["panel_region"] = max(0.25, min(float(slot.get("panel_region", 0.44)), 0.72))
+    if slot.get("caption_position", "auto") not in CAPTION_POSITIONS:
+        raise ValueError("Unknown caption position")
+    if slot.get("layout_template") == "broll_only":
+        slot["keep_subject_foreground"] = False
+        slot["panel_region"] = 1.0
+    else:
+        slot["keep_subject_foreground"] = bool(slot.get("keep_subject_foreground", True))
+        slot["panel_region"] = max(0.25, min(float(slot.get("panel_region", 0.44)), 0.72))
+    slot["show_caption"] = bool(slot.get("show_caption", False))
     for other in plan.get("slots", []):
         if other.get("slot_id") == slot_id or other.get("status") in {"rejected", "talking_head"}:
             continue
@@ -183,7 +205,6 @@ def slot_action(run_id: str, slot_id: str, action: str) -> dict[str, Any]:
     return slot
 
 
-
 def refine_slot(run_id: str, slot_id: str, instruction: str = "") -> dict[str, Any]:
     """Use the run-scoped slot-refinement model without changing other slots."""
     paths = run_paths(run_id)
@@ -229,7 +250,6 @@ def refine_slot(run_id: str, slot_id: str, instruction: str = "") -> dict[str, A
         cwd=paths.root, output_schema=schema,
     )
     write_json(response_dir / f"{slot_id}-{version}.json", {"selection": selection, "result": payload})
-    # update_slot owns timing, overlap, layout, and panel-region validation.
     refined = update_slot(run_id, slot_id, payload)
     refined.setdefault("review", {})["plan"] = "ai_refined"
     refreshed = read_json(paths.plan / "broll_plan.json")
@@ -238,8 +258,9 @@ def refine_slot(run_id: str, slot_id: str, instruction: str = "") -> dict[str, A
     write_json(paths.plan / "broll_plan.json", refreshed)
     return target
 
+
 def _compact_settings(settings: dict[str, Any]) -> dict[str, Any]:
-    return {key: settings.get(key) for key in ("width", "height", "fps", "aspect_ratio")}
+    return {key: settings.get(key) for key in ("width", "height", "fps", "aspect_ratio", "captions_mode")}
 
 
 def _compact_transcript(transcript: dict[str, Any]) -> dict[str, Any]:
@@ -267,6 +288,7 @@ def _fallback_plan(transcript: dict[str, Any], analysis: dict[str, Any]) -> dict
             "transcript": phrase.get("text", ""), "purpose": "Explain this phrase visually",
             "priority": "useful", "layout_template": "bottom_board", "visual_type": "medical_illustration",
             "keep_subject_foreground": True, "panel_region": 0.44,
+            "show_caption": False, "caption_position": "auto",
             "still_brief": f"A clean dental visual explaining: {phrase.get('text','')}",
             "motion_brief": "Subtle stable movement only", "text_overlay": "",
             "safety": ["No blood", "No fake patient result", "No text inside image", "Accurate dental anatomy"],
