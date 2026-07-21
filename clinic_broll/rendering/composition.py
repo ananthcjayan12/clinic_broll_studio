@@ -14,7 +14,13 @@ from ..core.state import load_run
 FOREGROUND_CHUNK_SECONDS = 2.0
 
 
-def build(run_id: str, mode: str) -> Path:
+def build(
+    run_id: str,
+    mode: str,
+    *,
+    window: tuple[float, float] | None = None,
+    composition_name: str | None = None,
+) -> Path:
     if mode not in {"still", "motion", "final"}:
         raise ValueError(mode)
     paths = run_paths(run_id)
@@ -22,12 +28,20 @@ def build(run_id: str, mode: str) -> Path:
     plan = read_json(paths.plan / "broll_plan.json", {"slots": []})
     transcript = read_json(paths.transcript / "transcript.json", {"phrases": []})
     source_meta = read_json(paths.source / "metadata.json", {})
-    duration = float(source_meta.get("duration_seconds") or transcript.get("duration_seconds") or 1)
-    composition = paths.compositions / mode
+    source_duration = float(source_meta.get("duration_seconds") or transcript.get("duration_seconds") or 1)
+    window_start, window_end = window or (0.0, source_duration)
+    if window_start < 0 or window_end <= window_start or window_end > source_duration + 1e-6:
+        raise ValueError(f"Invalid composition window: {window_start:.6f}-{window_end:.6f}")
+    duration = window_end - window_start
+    composition = paths.compositions / (composition_name or mode)
     assets = composition / "assets"
     assets.mkdir(parents=True, exist_ok=True)
-    source = paths.source / ("master.mp4" if mode == "final" else "proxy.mp4")
-    link_or_copy(source, assets / "talking-head.mp4")
+    # Preview compositions include the proxy directly. The final composition
+    # is a transparent overlay which FFmpeg later composites over the master;
+    # injecting every full-resolution master frame into Chromium exhausts its
+    # decoded-image cache on modest-memory machines.
+    if mode != "final":
+        link_or_copy(paths.source / "proxy.mp4", assets / "talking-head.mp4")
     foreground_source = paths.matte / "foreground.webm"
     foreground_available = foreground_source.exists()
     if foreground_available:
@@ -35,6 +49,9 @@ def build(run_id: str, mode: str) -> Path:
 
     rendered_slots = []
     for slot in plan.get("slots", []):
+        windowed_slot = _slot_in_window(slot, window_start, window_end)
+        if windowed_slot is None:
+            continue
         media = _select_media(paths.root, slot, mode)
         if not media:
             continue
@@ -42,7 +59,7 @@ def build(run_id: str, mode: str) -> Path:
         link_or_copy(media, destination)
         rendered_slots.append(
             {
-                **slot,
+                **windowed_slot,
                 "media_file": destination.name,
                 "media_kind": "video" if media.suffix.lower() in {".mp4", ".mov", ".webm", ".m4v"} else "image",
             }
@@ -55,14 +72,40 @@ def build(run_id: str, mode: str) -> Path:
         "height": int(meta["settings"].get("height", 1920)),
         "fps": int(meta["settings"].get("fps", 30)),
         "duration": duration,
+        "timeline_offset": window_start,
         "foreground_available": foreground_available,
         "slots": rendered_slots,
-        "phrases": transcript.get("phrases") or [],
-        "captions": transcript.get("captions") or transcript.get("phrases") or [],
+        "phrases": _items_in_window(transcript.get("phrases") or [], window_start, window_end),
+        "captions": _items_in_window(
+            transcript.get("captions") or transcript.get("phrases") or [], window_start, window_end
+        ),
     }
     write_json(composition / "composition-manifest.json", manifest)
     (composition / "index.html").write_text(_html(manifest), encoding="utf-8")
     return composition / "index.html"
+
+
+def _slot_in_window(
+    slot: dict[str, Any], window_start: float, window_end: float
+) -> dict[str, Any] | None:
+    start = float(slot["start"])
+    end = start + float(slot["duration"])
+    if end <= window_start or start >= window_end:
+        return None
+    if start < window_start - 1e-6 or end > window_end + 1e-6:
+        raise ValueError(f"Chunk boundary splits slot {slot.get('slot_id')}: {start:.6f}-{end:.6f}")
+    return {**slot, "start": start - window_start, "end": end - window_start}
+
+
+def _items_in_window(items: list[dict[str, Any]], window_start: float, window_end: float) -> list[dict[str, Any]]:
+    shifted: list[dict[str, Any]] = []
+    for item in items:
+        start = float(item.get("start") or 0)
+        end = float(item.get("end") or start)
+        if end <= window_start or start >= window_end:
+            continue
+        shifted.append({**item, "start": start - window_start, "end": end - window_start})
+    return shifted
 
 
 def _select_media(run_root: Path, slot: dict[str, Any], mode: str) -> Path | None:
@@ -101,6 +144,12 @@ def _html(manifest: dict[str, Any]) -> str:
     # Source-bounded clip elements omit inactive alpha frames from capture;
     # data-media-start preserves the immutable source timeline.
     foreground = _foreground_markup(manifest)
+    transparent_base = manifest["mode"] == "final"
+    master = "" if transparent_base else (
+        f'<video id="master" class="track" data-start="0" data-duration="{duration:.6f}" '
+        'data-track-index="0" data-volume="1" data-has-audio="true" '
+        'src="assets/talking-head.mp4" playsinline preload="auto"></video>'
+    )
     phrases = json.dumps(manifest["phrases"], ensure_ascii=False)
     captions = json.dumps(manifest.get("captions") or manifest["phrases"], ensure_ascii=False)
     slots_json = json.dumps(
@@ -130,8 +179,8 @@ def _html(manifest: dict[str, Any]) -> str:
 <style>
 :root {--teal:#36d1c4;--navy:#07111f;--panel:#102442;--ink:#f2f8ff;--muted:#a8c0d8}
 *{box-sizing:border-box}
-html,body{margin:0;background:#02070d;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
-#stage{position:relative;width:__WIDTH__px;height:__HEIGHT__px;overflow:hidden;background:#081321;transform-origin:top left}
+html,body{margin:0;background:__PAGE_BACKGROUND__;color:var(--ink);font-family:Inter,ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
+#stage{position:relative;width:__WIDTH__px;height:__HEIGHT__px;overflow:hidden;background:__STAGE_BACKGROUND__;transform-origin:top left}
 .track{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
 #master{z-index:1}
 .slot{position:absolute;inset:0;z-index:10;pointer-events:none;opacity:0;overflow:hidden}
@@ -160,7 +209,7 @@ html,body{margin:0;background:#02070d;color:var(--ink);font-family:Inter,ui-sans
 </head>
 <body>
 <div id="stage" data-composition-id="clinic-broll" data-no-timeline data-start="0" data-duration="__DURATION__" data-width="__WIDTH__" data-height="__HEIGHT__" data-fps="__FPS__">
-  <video id="master" class="track" data-start="0" data-duration="__DURATION__" data-track-index="0" data-volume="1" data-has-audio="true" src="assets/talking-head.mp4" playsinline preload="auto"></video>
+  __MASTER__
   __SLOTS__
   __FOREGROUND__
   <div id="caption" class="caption"></div>
@@ -212,6 +261,9 @@ window.__hf_ready__=true;
         "__FPS__": str(fps),
         "__SLOTS__": slot_markup,
         "__FOREGROUND__": foreground,
+        "__MASTER__": master,
+        "__PAGE_BACKGROUND__": "transparent" if transparent_base else "#02070d",
+        "__STAGE_BACKGROUND__": "transparent" if transparent_base else "#081321",
         "__PHRASES__": phrases,
         "__CAPTIONS__": captions,
         "__SLOTS_JSON__": slots_json,
@@ -234,6 +286,7 @@ def _foreground_markup(manifest: dict[str, Any], max_chunk_seconds: float = FORE
         return ""
     markup: list[str] = []
     fps = int(manifest["fps"])
+    timeline_offset = float(manifest.get("timeline_offset") or 0)
     for slot in manifest["slots"]:
         if not slot.get("keep_subject_foreground", True):
             continue
@@ -244,11 +297,12 @@ def _foreground_markup(manifest: dict[str, Any], max_chunk_seconds: float = FORE
             chunk_start = round(chunk_start, 6)
             chunk_end = round(chunk_end, 6)
             chunk_duration = chunk_end - chunk_start
+            media_start = timeline_offset + chunk_start
             markup.append(
                 f'<video id="{html.escape(slot_id)}-foreground-{index + 1:02d}" class="foreground clip" '
                 f'data-foreground-slot="{html.escape(slot_id)}" '
                 f'data-start="{chunk_start:.6f}" data-duration="{chunk_duration:.6f}" '
-                f'data-media-start="{chunk_start:.6f}" data-track-index="40" '
+                f'data-media-start="{media_start:.6f}" data-track-index="40" '
                 'src="assets/foreground.webm" muted playsinline></video>'
             )
     return "\n".join(markup)

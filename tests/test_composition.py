@@ -1,4 +1,6 @@
-from clinic_broll.rendering.composition import _html
+import pytest
+
+from clinic_broll.rendering.composition import _html, _items_in_window, _slot_in_window
 
 
 def test_layered_composition_has_hyperframes_contract():
@@ -108,3 +110,34 @@ def test_motion_media_is_a_direct_hyperframes_clip():
     video_at = document.index('id="broll_001-media"')
     assert video_at > section_end
     assert 'class="generated generated-track clip right_panel"' in document
+
+
+def test_final_composition_is_a_transparent_overlay_without_master_video():
+    document = _html({
+        "mode": "final", "width": 1080, "height": 1920, "fps": 30, "duration": 4.0,
+        "foreground_available": False, "phrases": [], "slots": [],
+    })
+    assert "background:transparent" in document
+    assert 'id="master"' not in document
+    assert 'data-has-audio="true"' not in document
+
+
+def test_chunk_timeline_shifts_slots_captions_and_foreground_source_time():
+    slot = {
+        "slot_id": "broll_001", "start": 14.72, "end": 17.66, "duration": 2.94,
+        "layout_template": "full_frame", "panel_region": 1.0,
+        "keep_subject_foreground": True, "text_overlay": "",
+        "media_file": "broll_001.png", "media_kind": "image",
+    }
+    shifted = _slot_in_window(slot, 14.7, 24.133333)
+    assert shifted is not None
+    assert shifted["start"] == pytest.approx(0.02)
+    captions = _items_in_window([{"start": 14.5, "end": 15.2, "text": "keep"}], 14.7, 24.133333)
+    assert captions[0]["start"] == pytest.approx(-0.2)
+    document = _html({
+        "mode": "final", "width": 1080, "height": 1920, "fps": 30,
+        "duration": 9.433333, "timeline_offset": 14.7,
+        "foreground_available": True, "phrases": captions, "slots": [shifted],
+    })
+    assert 'data-start="0.020000"' in document
+    assert 'data-media-start="14.720000"' in document
