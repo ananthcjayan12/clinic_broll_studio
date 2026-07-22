@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["enabled", "density", "cues"],
+  "properties": {
+    "enabled": {"type": "boolean"},
+    "density": {"enum": ["off", "low", "medium", "high"]},
+    "cues": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["time", "scene_id", "intent", "sound_id", "gain_db", "enabled", "reason"],
+        "properties": {
+          "time": {"type": "number", "minimum": 0},
+          "scene_id": {"type": "string"},
+          "intent": {"type": "string"},
+          "sound_id": {"type": "string"},
+          "gain_db": {"type": "number", "minimum": -40, "maximum": -3},
+          "trim_start": {"type": "number", "minimum": 0},
+          "duration": {"type": "number", "minimum": 0.05, "maximum": 8},
+          "fade_in_ms": {"type": "integer", "minimum": 0, "maximum": 1000},
+          "fade_out_ms": {"type": "integer", "minimum": 0, "maximum": 2000},
+          "duck_under_speech_db": {"type": "number", "minimum": 0, "maximum": 12},
+          "enabled": {"type": "boolean"},
+          "reason": {"type": "string"}
+        }
+      }
+    }
+  }
+}
