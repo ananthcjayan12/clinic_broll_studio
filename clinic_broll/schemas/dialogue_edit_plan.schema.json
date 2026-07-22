@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "edits"],
+  "properties": {
+    "summary": {"type": "string", "maxLength": 1000},
+    "edits": {
+      "type": "array",
+      "maxItems": 250,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "start", "end", "category", "transcript", "recommended_action",
+          "confidence", "reason", "requires_review", "medical_risk"
+        ],
+        "properties": {
+          "start": {"type": "number", "minimum": 0},
+          "end": {"type": "number", "minimum": 0},
+          "category": {
+            "type": "string",
+            "enum": ["filler", "repeated_word", "repeated_sentence", "false_start", "long_pause", "mouth_noise", "other"]
+          },
+          "transcript": {"type": "string", "maxLength": 1200},
+          "recommended_action": {
+            "type": "string",
+            "enum": ["remove", "shorten_pause", "keep", "manual_review"]
+          },
+          "target_pause_seconds": {"type": ["number", "null"], "minimum": 0.08, "maximum": 1.5},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "reason": {"type": "string", "maxLength": 1000},
+          "requires_review": {"type": "boolean"},
+          "medical_risk": {"type": "string", "enum": ["none", "low", "medium", "high"]}
+        }
+      }
+    }
+  }
+}
