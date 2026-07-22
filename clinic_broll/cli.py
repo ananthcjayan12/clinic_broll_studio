@@ -52,7 +52,11 @@ def main() -> None:
     if args.command == "serve":
         import uvicorn
 
-        uvicorn.run("clinic_broll.studio.server:app", host=args.host, port=args.port, reload=False)
+        from .studio.dialogue_api import register_dialogue_routes
+        from .studio.server import app
+
+        register_dialogue_routes(app)
+        uvicorn.run(app, host=args.host, port=args.port, reload=False)
     elif args.command == "doctor":
         _doctor()
     elif args.command == "step":
