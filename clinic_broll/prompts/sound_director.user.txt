@@ -1,0 +1,15 @@
+Create the sound plan.
+
+DENSITY
+{density}
+
+EDITORIAL PLAN
+{editorial_plan}
+
+EDIT CHOREOGRAPHY
+{choreography}
+
+AVAILABLE LOCAL SOUND CANDIDATES
+{candidates}
+
+Every selected sound_id must exist in the candidates. Keep gains conservative, normally -22 dB to -14 dB. Use short fades, do not mask speech, and return an empty cues array when sound would not improve the edit.
