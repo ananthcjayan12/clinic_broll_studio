@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["summary", "scenes"],
+  "properties": {
+    "summary": {"type": "string"},
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["start", "end", "narration", "editorial_purpose", "composition_mode", "layout_variant", "subject_mode", "visual_style", "camera_move", "transition_in", "transition_out", "caption_mode", "sound_intent"],
+        "properties": {
+          "start": {"type": "number"},
+          "end": {"type": "number"},
+          "narration": {"type": "string"},
+          "editorial_purpose": {"type": "string"},
+          "energy": {"type": "number", "minimum": 0, "maximum": 1},
+          "concept_density": {"type": "number", "minimum": 0, "maximum": 1},
+          "keep_eye_contact": {"type": "boolean"},
+          "composition_mode": {"enum": ["talking_head", "split_layout", "full_broll", "layered_foreground", "picture_in_picture", "graphic_scene", "comparison", "montage"]},
+          "layout_variant": {"enum": ["talking_head", "broll_top_speaker_bottom", "speaker_top_broll_bottom", "speaker_left_broll_right", "broll_left_speaker_right", "picture_in_picture", "floating_visual", "full_broll", "layered_foreground"]},
+          "subject_mode": {"enum": ["original", "cropped_original", "matte_foreground", "picture_in_picture", "hidden"]},
+          "visual_style": {"enum": ["natural_lifestyle", "colorful_macro", "clean_medical_illustration", "clinic_authentic", "playful_explainer", "mixed"]},
+          "visual_brief": {"type": "string"},
+          "motion_brief": {"type": "string"},
+          "text_overlay": {"type": "string"},
+          "camera_move": {"enum": ["static", "subtle_punch_in", "emphasis_punch", "slow_push", "micro_pull_back", "face_follow", "object_follow"]},
+          "transition_in": {"enum": ["direct_cut", "soft_crossfade", "clean_push", "vertical_slide", "horizontal_swipe", "mask_reveal", "paper_reveal", "zoom_match", "blur_transition", "dip_to_white"]},
+          "transition_out": {"enum": ["direct_cut", "soft_crossfade", "clean_push", "vertical_slide", "horizontal_swipe", "mask_reveal", "paper_reveal", "zoom_match", "blur_transition", "dip_to_white"]},
+          "emphasis_preset": {"enum": ["none", "keyword_pop", "card_snap", "underline_draw", "number_count", "icon_bounce", "warning_pulse", "comparison_flip"]},
+          "caption_mode": {"enum": ["off", "auto", "on"]},
+          "sound_intent": {"type": "array", "items": {"type": "string"}},
+          "priority": {"enum": ["essential", "useful", "optional"]},
+          "safety": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    }
+  }
+}
