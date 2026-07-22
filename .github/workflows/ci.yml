@@ -37,6 +37,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - run: python -m compileall -q clinic_broll scripts
+      - run: node --check clinic_broll/studio/static/simple-app.js
       - run: node --check clinic_broll/studio/static/app.js
       - run: node --check clinic_broll/studio/static/dialogue-v2.js
       - run: npx hyperframes --version
