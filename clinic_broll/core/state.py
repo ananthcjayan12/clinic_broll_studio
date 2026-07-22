@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import json
-import shutil
 from dataclasses import dataclass
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 from .config import DEFAULT_FPS, DEFAULT_HEIGHT, DEFAULT_WIDTH
@@ -26,31 +23,48 @@ class Stage:
 STAGES: tuple[Stage, ...] = (
     Stage(1, "ingest", "Inputs & normalize"),
     Stage(2, "transcribe", "Malayalam transcription", paid=True),
-    Stage(3, "analyze", "Local video analysis"),
-    Stage(4, "plan", "B-roll planning", paid=True, human_gate=True),
-    Stage(5, "matte", "Foreground subject matte"),
-    Stage(6, "stills", "Generate still candidates", paid=True),
-    Stage(7, "still_preview", "Still preview", human_gate=True),
-    Stage(8, "motion", "Generate approved motion", paid=True),
-    Stage(9, "motion_preview", "Motion preview", human_gate=True),
-    Stage(10, "render", "Final render"),
-    Stage(11, "qa", "Final QA", paid=True),
+    Stage(3, "dialogue_analysis", "Dialogue cleanup analysis", paid=True, human_gate=True),
+    Stage(4, "clean_master", "Clean master & continuity"),
+    Stage(5, "analyze", "Local video analysis"),
+    Stage(6, "plan", "B-roll planning", paid=True, human_gate=True),
+    Stage(7, "matte", "Foreground subject matte"),
+    Stage(8, "stills", "Generate still candidates", paid=True),
+    Stage(9, "still_preview", "Still preview", human_gate=True),
+    Stage(10, "motion", "Generate approved motion", paid=True),
+    Stage(11, "motion_preview", "Motion preview", human_gate=True),
+    Stage(12, "render", "Final render"),
+    Stage(13, "qa", "Final QA", paid=True),
 )
 STAGE_BY_NUMBER = {item.number: item for item in STAGES}
 STAGE_BY_KEY = {item.key: item for item in STAGES}
 
 STAGE_OUTPUTS: dict[int, tuple[str, ...]] = {
-    1: ("source/master.mp4", "source/proxy.mp4", "source/speech.wav", "source/metadata.json"),
-    2: ("transcript",),
-    3: ("analysis",),
-    4: ("plan",),
-    5: ("matte",),
-    6: ("assets/stills", "prompts/stills", "responses/stills"),
-    7: ("compositions/still", "previews/still-preview.mp4"),
-    8: ("assets/motion", "prompts/motion", "responses/motion"),
-    9: ("compositions/motion", "previews/motion-preview.mp4"),
-    10: ("compositions/final", "renders/final.mp4"),
-    11: ("qa",),
+    1: (
+        "source/master.mp4", "source/proxy.mp4", "source/speech.wav", "source/metadata.json",
+        "dialogue/source-master.mp4", "dialogue/source-proxy.mp4",
+        "dialogue/source-speech.wav", "dialogue/source-metadata.json",
+    ),
+    2: ("transcript", "dialogue/source-transcript.json", "dialogue/source-captions.srt"),
+    3: ("dialogue/edit-plan.json", "prompts/dialogue", "responses/dialogue"),
+    4: (
+        "dialogue/source-to-clean-map.json",
+        "dialogue/continuity-plan.json",
+        "source/master.mp4",
+        "source/proxy.mp4",
+        "source/speech.wav",
+        "source/metadata.json",
+        "transcript/transcript.json",
+        "transcript/captions.srt",
+    ),
+    5: ("analysis",),
+    6: ("plan",),
+    7: ("matte",),
+    8: ("assets/stills", "prompts/stills", "responses/stills"),
+    9: ("compositions/still", "previews/still-preview.mp4"),
+    10: ("assets/motion", "prompts/motion", "responses/motion"),
+    11: ("compositions/motion", "previews/motion-preview.mp4"),
+    12: ("compositions/final", "renders/final.mp4"),
+    13: ("qa",),
 }
 
 
@@ -89,6 +103,8 @@ def create_run(
         "media_provider": "grok_cli",
         "image_candidates_per_slot": 1,
         "captions_mode": "off",
+        "dialogue_cleanup_mode": "balanced",
+        "dialogue_crossfade_ms": 25,
         "matte_feather_px": 4,
         "matte_temporal_blend": 0.12,
         "matte_decontamination_strength": 0.72,
@@ -99,7 +115,7 @@ def create_run(
         resolved.update(settings)
     resolved["task_models"] = validate_model_map(resolved.get("task_models"))
     meta = {
-        "version": "1.1",
+        "version": "1.2",
         "run_id": run_id,
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -107,7 +123,7 @@ def create_run(
         "settings": resolved,
         "stages": [_empty_stage(stage) for stage in STAGES],
         "active_process": None,
-        "approvals": {"plan": False, "stills": False, "motion": False, "final": False},
+        "approvals": {"dialogue": False, "plan": False, "stills": False, "motion": False, "final": False},
         "notes": [],
     }
     write_json(paths.meta, meta)
@@ -120,7 +136,50 @@ def load_run(run_id: str) -> dict[str, Any]:
     meta = read_json(paths.meta)
     if not meta:
         raise FileNotFoundError(f"Unknown run: {run_id}")
+    if _migrate_meta(meta):
+        write_json(paths.meta, meta)
+        append_log(paths, "Run metadata migrated to dialogue-cleanup pipeline v1.2")
     return meta
+
+
+def _migrate_meta(meta: dict[str, Any]) -> bool:
+    changed = False
+    settings = meta.setdefault("settings", {})
+    defaults = {"dialogue_cleanup_mode": "balanced", "dialogue_crossfade_ms": 25}
+    for key, value in defaults.items():
+        if key not in settings:
+            settings[key] = value
+            changed = True
+    validated = validate_model_map(settings.get("task_models"))
+    if validated != settings.get("task_models"):
+        settings["task_models"] = validated
+        changed = True
+
+    current_keys = [str(item.get("key")) for item in meta.get("stages", [])]
+    desired_keys = [stage.key for stage in STAGES]
+    if current_keys != desired_keys:
+        existing = {str(item.get("key")): item for item in meta.get("stages", [])}
+        rebuilt = []
+        has_dialogue = "dialogue_analysis" in existing
+        for stage in STAGES:
+            if stage.key in existing and (has_dialogue or stage.number <= 2):
+                old = existing[stage.key]
+                record = _empty_stage(stage)
+                record.update({key: old.get(key) for key in ("status", "started_at", "completed_at", "error", "artifacts")})
+                record.update({"number": stage.number, "label": stage.label, "paid": stage.paid, "human_gate": stage.human_gate})
+            else:
+                record = _empty_stage(stage)
+            rebuilt.append(record)
+        meta["stages"] = rebuilt
+        changed = True
+    approvals = meta.setdefault("approvals", {})
+    if "dialogue" not in approvals:
+        approvals["dialogue"] = False
+        changed = True
+    if meta.get("version") != "1.2":
+        meta["version"] = "1.2"
+        changed = True
+    return changed
 
 
 def save_run(meta: dict[str, Any]) -> None:
@@ -184,9 +243,9 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
         record = stage_record(meta, number)
         record.update({"status": "pending", "started_at": None, "completed_at": None, "error": None, "artifacts": []})
 
-    if plan and from_stage > 4:
+    if plan and from_stage > 6:
         for slot in plan.get("slots", []):
-            if from_stage <= 6:
+            if from_stage <= 8:
                 slot.setdefault("versions", {})["stills"] = []
                 slot.setdefault("versions", {})["motion"] = []
                 slot["selected_still"] = None
@@ -195,7 +254,7 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
                     slot["status"] = "plan_approved"
                 slot.setdefault("review", {})["still"] = None
                 slot.setdefault("review", {})["motion"] = None
-            elif from_stage <= 8:
+            elif from_stage <= 10:
                 slot.setdefault("versions", {})["motion"] = []
                 slot["selected_motion"] = None
                 if slot.get("selected_still") and slot.get("status") not in {"rejected", "talking_head"}:
@@ -203,13 +262,15 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
                 slot.setdefault("review", {})["motion"] = None
         write_json(plan_path, plan)
 
-    if from_stage <= 4:
-        meta["approvals"]["plan"] = False
+    if from_stage <= 3:
+        meta["approvals"]["dialogue"] = False
     if from_stage <= 6:
-        meta["approvals"]["stills"] = False
+        meta["approvals"]["plan"] = False
     if from_stage <= 8:
-        meta["approvals"]["motion"] = False
+        meta["approvals"]["stills"] = False
     if from_stage <= 10:
+        meta["approvals"]["motion"] = False
+    if from_stage <= 12:
         meta["approvals"]["final"] = False
     append_log(paths, f"Rewound from stage {from_stage}; previous artifacts saved in {history_root.name}")
     save_run(meta)
@@ -224,6 +285,9 @@ def list_runs() -> list[dict[str, Any]]:
     for meta_path in RUNS_ROOT.glob("*/studio_run.json"):
         try:
             meta = read_json(meta_path)
+            if not meta:
+                continue
+            _migrate_meta(meta)
             current = next_incomplete(meta)
             results.append(
                 {
@@ -258,7 +322,7 @@ def public_run_detail(run_id: str) -> dict[str, Any]:
     return {**meta, "plan": plan, "transcript": transcript, "artifacts": artifacts, "usage": usage_summary(paths.root)}
 
 
-def _url_if_exists(run_id: str, path: Path) -> str | None:
+def _url_if_exists(run_id: str, path) -> str | None:
     if not path.exists():
         return None
     relative = path.relative_to(run_paths(run_id).root).as_posix()
