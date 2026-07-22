@@ -101,11 +101,14 @@ def register_dialogue_routes(app: FastAPI) -> None:
     @router.post("/runs/{run_id}/skip")
     def skip_optional_stage(run_id: str, request: SkipStageRequest) -> dict[str, Any]:
         _require_idle(run_id)
-        if request.step not in {7, 10, 11}:
-            raise HTTPException(status_code=400, detail="Only matte, motion generation, and motion preview may be skipped")
+        if request.step not in {8, 9, 10, 12}:
+            raise HTTPException(
+                status_code=400,
+                detail="Only visual generation, visual preview, motion generation, and sound design may be skipped",
+            )
         meta = load_run(run_id)
         if request.step > 1 and stage_record(meta, request.step - 1)["status"] not in {"complete", "skipped"}:
-            raise HTTPException(status_code=400, detail="Complete the previous stage first")
+            raise HTTPException(status_code=400, detail="Complete or skip the previous stage first")
         mark_stage(run_id, request.step, "skipped", summary={"reason": "Skipped by operator"})
         return {"skipped": request.step}
 
