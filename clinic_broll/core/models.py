@@ -11,13 +11,7 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
     },
     "codex_cli": {
         "label": "Codex CLI (ChatGPT)",
-        "models": [
-            "authenticated-default",
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
-            "gpt-5.5",
-        ],
+        "models": ["authenticated-default", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"],
         "efforts": ["low", "medium", "high", "xhigh", "max", "ultra"],
     },
     "claude_cli": {
@@ -37,14 +31,14 @@ TASK_CATALOG: dict[str, dict[str, Any]] = {
     "editorial_director": {"label": "Editorial director and scene graph", "stage": 6},
     "visual_bible_director": {"label": "Visual continuity bible", "stage": 6},
     "slot_refinement": {"label": "Scene refinement", "stage": 6},
-    "image_prompt": {"label": "Natural and colourful visual direction", "stage": 9},
-    "visual_candidate_reviewer": {"label": "Visual candidate reviewer", "stage": 9},
-    "motion_prompt": {"label": "Image-to-video motion direction", "stage": 11},
-    "edit_choreographer": {"label": "Edit choreography and camera moves", "stage": 12},
-    "sound_director": {"label": "Sound-effects director", "stage": 13},
-    "final_edit_reviewer": {"label": "Final visual, edit, and audio review", "stage": 16},
-    "semantic_qa": {"label": "Semantic and clinical QA", "stage": 16},
-    "repair_advisor": {"label": "Targeted repair advisor", "stage": 16},
+    "image_prompt": {"label": "Natural and colourful visual direction", "stage": 8},
+    "visual_candidate_reviewer": {"label": "Visual candidate reviewer", "stage": 8},
+    "motion_prompt": {"label": "Image-to-video motion direction", "stage": 10},
+    "edit_choreographer": {"label": "Edit choreography and camera moves", "stage": 11},
+    "sound_director": {"label": "Sound-effects director", "stage": 12},
+    "final_edit_reviewer": {"label": "Final visual, edit, and audio review", "stage": 15},
+    "semantic_qa": {"label": "Semantic and clinical QA", "stage": 15},
+    "repair_advisor": {"label": "Targeted repair advisor", "stage": 15},
 }
 
 DEFAULT_MODEL_MAP: dict[str, dict[str, str]] = {
