@@ -150,6 +150,7 @@ def _html(manifest: dict[str, Any]) -> str:
 <html lang="en"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>Clinic B-roll V2 · __MODE__</title>
 <style>
+@font-face{font-family:"Noto Sans Malayalam";src:local("Noto Sans Malayalam")}
 :root{--teal:#32cfc0;--cream:#fff8ec;--coral:#ff806f;--mint:#c8f3e8;--ink:#f7fbff;--navy:#07111f}
 *{box-sizing:border-box}html,body{margin:0;background:__PAGE_BACKGROUND__;color:var(--ink);font-family:Inter,"Noto Sans Malayalam",ui-sans-serif,system-ui,-apple-system,sans-serif;overflow:hidden}
 #stage{position:relative;width:__WIDTH__px;height:__HEIGHT__px;overflow:hidden;background:__STAGE_BACKGROUND__;transform-origin:top left}
@@ -243,7 +244,11 @@ def _slot_markup(slot: dict[str, Any], timeline_offset: float = 0.0) -> str:
     face_y = ((float(face_box[1]) + float(face_box[3])) / 2) * 100
     subject_mode = str(slot.get("subject_mode") or "matte_foreground")
     source_subject = ""
-    if subject_mode in {"original", "cropped_original", "picture_in_picture"}:
+    # Talking-head scenes already use the master video track underneath every
+    # slot. Adding another timed copy is redundant and creates fragile tiny
+    # clips at editorial continuity boundaries. Subject copies are needed only
+    # for split and picture-in-picture layouts.
+    if layout != "talking_head" and subject_mode in {"original", "cropped_original", "picture_in_picture"}:
         media_start = timeline_offset + start
         source_subject = (
             f'<video id="{slot_id}-subject" class="subject-copy clip" data-start="{start:.6f}" '
@@ -251,13 +256,12 @@ def _slot_markup(slot: dict[str, Any], timeline_offset: float = 0.0) -> str:
             f'style="--face-x:{face_x:.2f}%;--face-y:{face_y:.2f}%" src="assets/source-head.mp4" muted playsinline preload="auto"></video>'
         )
     media_tag = ""
-    direct_media = ""
     media_file = slot.get("media_file")
     if media_file:
         source = html.escape(str(media_file))
         if slot.get("media_kind") == "video":
-            direct_media = (
-                f'<video id="{slot_id}-media" class="generated generated-track clip {layout}" '
+            media_tag = (
+                f'<video id="{slot_id}-media" class="generated generated-track clip" '
                 f'data-start="{start:.6f}" data-duration="{duration:.6f}" data-track-index="20" data-loop '
                 f'style="--region:{region}" src="assets/{source}" muted playsinline preload="auto"></video>'
             )
@@ -266,11 +270,10 @@ def _slot_markup(slot: dict[str, Any], timeline_offset: float = 0.0) -> str:
     copy = html.escape(str(slot.get("text_overlay") or ""))
     copy_markup = f'<div id="{slot_id}-copy" class="local-copy">{copy}</div>' if copy else ""
     panel = (
-        f'<section id="{slot_id}" class="slot clip {layout} emphasis-{emphasis}" data-start="{start:.6f}" '
-        f'data-duration="{duration:.6f}" data-track-index="10" style="--region:{region}">'
+        f'<section id="{slot_id}" class="slot {layout} emphasis-{emphasis}" style="--region:{region}">'
         f'<div id="{slot_id}-panel" class="panel"></div>{media_tag}{source_subject}{copy_markup}</section>'
     )
-    return panel + direct_media
+    return panel
 
 
 def _foreground_markup(manifest: dict[str, Any], max_chunk_seconds: float = FOREGROUND_CHUNK_SECONDS) -> str:

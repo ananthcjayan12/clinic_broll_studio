@@ -7,6 +7,7 @@ from .pipeline.motion import run as run_motion
 from .pipeline.plan import refine_slot
 from .pipeline.orchestrator import run_stage, run_through
 from .pipeline.stills import run as run_stills
+from .core.state import mark_stage
 
 
 def main() -> None:
@@ -29,7 +30,17 @@ def main() -> None:
     elif args.slot_still:
         if not args.confirm_paid:
             raise RuntimeError('Explicit provider-usage confirmation is required for still generation')
-        run_stills(args.run_id, slot_id=args.slot_still, force=True)
+        result = run_stills(args.run_id, slot_id=args.slot_still, force=True)
+        # Slot-by-slot generation is the Studio's normal review workflow.  It
+        # must satisfy stage 8 just like a batch run, otherwise approved stills
+        # are stranded behind a stage that remains marked pending.
+        mark_stage(
+            args.run_id,
+            8,
+            "complete",
+            artifacts=result.get("artifacts", []),
+            summary=result.get("summary"),
+        )
     elif args.slot_motion:
         if not args.confirm_paid:
             raise RuntimeError('Explicit provider-usage confirmation is required for motion generation')

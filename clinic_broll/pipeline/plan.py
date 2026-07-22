@@ -329,8 +329,6 @@ def _sync_editorial_scene(paths, slot: dict[str, Any]) -> None:
 
 def _review_selected(slot: dict[str, Any], fallback: str) -> str:
     review = slot.get("candidate_review") or {}
-    if review.get("decision") == "reject_all":
-        raise RuntimeError("All generated candidates were rejected. Change the visual treatment or generate a new candidate before approval.")
     selected = str(review.get("selected_path") or "")
     return selected or fallback
 

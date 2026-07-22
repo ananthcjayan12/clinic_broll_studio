@@ -55,10 +55,49 @@ def test_medium_policy_caps_visual_count_coverage_and_generation_requests():
     assert policy["scenes"][-1]["visual_strategy"] == "none"
 
 
+def test_long_visual_beats_keep_a_short_broll_segment_instead_of_being_discarded():
+    payload = {
+        "summary": "long mechanism explanations",
+        "scenes": [
+            {
+                "start": 0, "end": 4, "narration": "hook", "editorial_purpose": "Trust",
+                "composition_mode": "talking_head", "layout_variant": "talking_head", "subject_mode": "original",
+            },
+            {
+                "start": 4, "end": 16, "narration": "acid softens enamel", "editorial_purpose": "Show acid",
+                "composition_mode": "full_broll", "layout_variant": "full_broll", "subject_mode": "hidden",
+                "visual_style": "clean_medical_illustration", "visual_brief": "enamel acid diagram",
+            },
+            {
+                "start": 16, "end": 25, "narration": "brushing abrasion", "editorial_purpose": "Show brushing",
+                "composition_mode": "split_layout", "layout_variant": "broll_top_speaker_bottom", "subject_mode": "cropped_original",
+                "visual_style": "clean_medical_illustration", "visual_brief": "toothbrush enamel diagram",
+            },
+            {
+                "start": 25, "end": 31, "narration": "wait 30 minutes", "editorial_purpose": "Show timer",
+                "composition_mode": "split_layout", "layout_variant": "broll_top_speaker_bottom", "subject_mode": "cropped_original",
+                "visual_style": "playful_explainer", "visual_brief": "30 minute clock",
+            },
+            {
+                "start": 31, "end": 36, "narration": "remember", "editorial_purpose": "Close",
+                "composition_mode": "talking_head", "layout_variant": "talking_head", "subject_mode": "original",
+            },
+        ],
+    }
+    policy = apply_editorial_policy(normalize_editorial_plan(payload, 36.0), {
+        "editing_intensity": "medium", "image_candidates_per_slot": 1, "fps": 30,
+    })
+    visuals = [scene for scene in policy["scenes"] if scene["visual_strategy"] != "none"]
+
+    assert visuals
+    assert all(scene["duration"] <= 6.0 for scene in visuals)
+    assert policy["budget_report"]["visual_coverage_ratio"] <= 0.32
+
+
 def test_candidate_setting_is_a_hard_maximum_for_essential_scenes():
     meta = {"settings": {"image_candidates_per_slot": 2}}
     assert _candidate_count(meta, {"priority": "essential", "visual_strategy": "generated_photo"}) == 2
-    assert _candidate_count(meta, {"priority": "essential", "visual_strategy": "dental_diagram"}) == 1
+    assert _candidate_count(meta, {"priority": "essential", "visual_strategy": "dental_diagram"}) == 2
 
 
 def test_dental_visuals_render_locally_without_a_media_provider(tmp_path: Path):

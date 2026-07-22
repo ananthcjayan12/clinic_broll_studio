@@ -17,7 +17,7 @@ def test_overlay_outputs_are_versioned(tmp_path):
     assert _next_overlay_dir(tmp_path).name == "final-overlay-v002"
 
 
-def test_chunk_windows_are_frame_aligned_and_do_not_split_slots():
+def test_chunk_windows_do_not_split_slots():
     slots = [
         {"start": 6.5, "duration": 5.5},
         {"start": 14.72, "duration": 2.94},
@@ -29,9 +29,19 @@ def test_chunk_windows_are_frame_aligned_and_do_not_split_slots():
     assert windows[0] == (0.0, 6.5)
     assert windows[-1][1] == 49.48
     assert all((end - start) <= 10.0 for start, end in windows)
-    assert all(round(start * 30) == start * 30 for start, _ in windows)
     for boundary in [end for _, end in windows[:-1]]:
         assert not any(slot["start"] < boundary < slot["start"] + slot["duration"] for slot in slots)
+
+
+def test_chunk_windows_keep_non_frame_aligned_scene_boundaries_intact():
+    slots = [
+        {"start": 0.0, "duration": 6.55},
+        {"start": 6.55, "duration": 6.0},
+    ]
+
+    windows = _chunk_windows(12.55, 30, slots, max_seconds=10.0)
+
+    assert windows == [(0.0, 6.55), (6.55, 12.55)]
 
 
 def test_overlay_chunks_use_lossless_concat_manifest(tmp_path):

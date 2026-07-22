@@ -117,7 +117,12 @@ def _check_gate(meta: dict[str, Any], stage_number: int) -> None:
             slot.get("slot_id") for slot in plan_payload.get("slots", [])
             if slot.get("status") == "suggested"
         ]
-        if unresolved or not meta.get("approvals", {}).get("editorial"):
+        # A scene decision is stored on the slot itself.  The older aggregate
+        # ``approvals.editorial`` flag is not set by the simplified Studio,
+        # including when every scene is intentionally kept as talking head.
+        # Requiring it here left a valid all-talking-head plan with no visible
+        # approval control and unable to advance.
+        if unresolved:
             raise RuntimeError(
                 "Approve, reject, or keep talking head for every Editorial Director scene before preparation"
             )

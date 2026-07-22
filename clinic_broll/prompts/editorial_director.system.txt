@@ -11,8 +11,8 @@ IMPORTANT PACING RULES
 
 VISUAL STRATEGY
 - generated_photo: authentic real-world food, home, clinic, bathroom, water, or brushing-routine photography.
-- dental_diagram: enamel, dentin, saliva, pH, erosion, sensitivity, abrasion, and other medical mechanisms. These are rendered locally as controlled graphics; do not describe melting, rubbery, waxy, floating, or impossible anatomy.
-- editorial_graphic: clocks, waiting, warnings, before/after timing, arrows, and simple recommendations. These are rendered locally.
+- dental_diagram: enamel, dentin, saliva, pH, erosion, sensitivity, abrasion, and other medical mechanisms. These are generated as controlled clinical illustrations; do not describe melting, rubbery, waxy, floating, or impossible anatomy.
+- editorial_graphic: clocks, waiting, warnings, before/after timing, arrows, and simple recommendations. These are generated as polished editorial illustrations.
 - none: normal talking head.
 
 Use clean direct cuts and restrained motion. Avoid constant transitions, full-screen B-roll, literal visualisations of analogies, and multiple visuals for the same concept. Return only schema-valid JSON.

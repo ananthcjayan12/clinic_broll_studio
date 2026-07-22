@@ -218,7 +218,15 @@ def normalize_editorial_plan(payload: dict[str, Any], duration: float, *, fps: i
             "safety": list(raw.get("safety") or ["Preserve clinical meaning", "No text inside generated image", "No distorted teeth or anatomy"]),
             "operator_visible": bool(raw.get("operator_visible", True)),
         }
-        scene["visual_strategy"] = visual_strategy_for(scene)
+        # Preserve the Director's explicit, schema-valid medium.  Falling back
+        # to keyword inference here can misclassify a dental diagram as a
+        # timing graphic merely because its brief says "after a meal".
+        explicit_strategy = str(raw.get("visual_strategy") or "")
+        scene["visual_strategy"] = (
+            explicit_strategy
+            if explicit_strategy in {"none", "generated_photo", "dental_diagram", "editorial_graphic"}
+            else visual_strategy_for(scene)
+        )
         scenes.append(scene)
         previous_end = end
     return {
@@ -356,7 +364,7 @@ def _fallback_visual_bible(settings: dict[str, Any]) -> dict[str, Any]:
         "camera_language": ["natural 35mm lifestyle", "stable macro only when physically credible", "simple asymmetric composition"],
         "texture_language": ["real food texture", "real brush materials", "clean vector dental layers"],
         "avoid": ["waxy anatomy", "floating teeth", "literal melting enamel", "collage seams", "fake text", "generic stock smile", "excessive teal glow"],
-        "medical_rules": ["use deterministic diagrams for anatomy and mechanisms", "no impossible brush geometry", "no diagnosis claims not present in narration"],
+        "medical_rules": ["use clinically restrained generated illustrations for anatomy and mechanisms", "no impossible brush geometry", "no diagnosis claims not present in narration"],
     }
 
 

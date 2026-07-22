@@ -1,3 +1,8 @@
+import json
+
+from clinic_broll.core.paths import RunPaths
+from clinic_broll.core.state import STAGES
+from clinic_broll.pipeline import orchestrator
 from clinic_broll.pipeline.choreography import normalize_choreography
 from clinic_broll.pipeline.editorial import editorial_to_broll_plan, normalize_editorial_plan
 from clinic_broll.pipeline.sound import _fallback_plan, _shortlist
@@ -76,6 +81,35 @@ def test_editorial_scene_graph_maps_to_modern_compatibility_layouts():
     assert plan["slots"][2]["keep_subject_foreground"] is False
 
 
+def test_explicit_director_visual_strategy_is_preserved_over_keyword_inference():
+    payload = _editorial_payload()
+    payload["scenes"][1]["visual_strategy"] = "dental_diagram"
+    payload["scenes"][1]["editorial_purpose"] = "Explain enamel after a meal"
+
+    editorial = normalize_editorial_plan(payload, 9.0)
+
+    assert editorial["scenes"][1]["visual_strategy"] == "dental_diagram"
+
+
+def test_preparation_allows_a_resolved_talking_head_only_plan(tmp_path, monkeypatch):
+    paths = RunPaths(tmp_path)
+    paths.plan.mkdir()
+    (paths.plan / "broll_plan.json").write_text(json.dumps({
+        "slots": [{"slot_id": "scene_001", "status": "talking_head"}],
+    }))
+    monkeypatch.setattr(orchestrator, "run_paths", lambda _: paths)
+    meta = {
+        "run_id": "test-run",
+        "approvals": {"editorial": False},
+        "stages": [
+            {"number": stage.number, "status": "complete" if stage.number < 7 else "pending"}
+            for stage in STAGES
+        ],
+    }
+
+    orchestrator._check_gate(meta, 7)
+
+
 def test_split_layout_renders_original_source_as_a_separate_subject_layer():
     document = _html({
         "mode": "still",
@@ -109,7 +143,7 @@ def test_split_layout_renders_original_source_as_a_separate_subject_layer():
         }],
     })
 
-    assert 'class="slot clip split_top' in document
+    assert 'class="slot split_top' in document
     assert 'id="broll_001-subject"' in document
     assert 'src="assets/source-head.mp4"' in document
     assert '.split_top .subject-copy' in document

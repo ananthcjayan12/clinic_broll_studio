@@ -154,13 +154,16 @@ function renderOverview() {
       ${selectSetting('editing_intensity','B-roll amount',['low','medium','high'],run.settings.editing_intensity)}
       ${selectSetting('image_candidates_per_slot','Image options',['1','2','3'],String(run.settings.image_candidates_per_slot || 1))}
       ${selectSetting('sfx_density','Sound effects',['off','low','medium'],run.settings.sfx_density)}
-    </div><p class="clean-note">Default recommendation: Medium or Low B-roll, one image option, and local dental graphics. Changing these after planning requires rewinding from step 6.</p></section>
+    </div><p class="clean-note">Default recommendation: Medium or Low B-roll and one image option. Changing these after planning requires rewinding from step 6.</p></section>
     <details class="advanced"><summary>Process log and technical details</summary><pre class="log" id="log">Loading…</pre></details>
   </div></div>`;
 }
 
 function stageRow(stage) {
-  return `<div class="stage-row ${esc(stage.status)}"><span class="stage-index">${stage.status === 'complete' ? '✓' : stage.number}</span><div><strong>${esc(stage.label)}</strong><small>${esc(stage.status)}${stage.paid ? ' · may use a provider' : ''}${stage.error ? ` · ${esc(stage.error)}` : ''}</small></div><button class="ghost" data-run-step="${stage.number}">Run</button></div>`;
+  const redo = ['complete','skipped','failed'].includes(stage.status)
+    ? `<button class="ghost" data-redo-step="${stage.number}">Redo from here</button>`
+    : '';
+  return `<div class="stage-row ${esc(stage.status)}"><span class="stage-index">${stage.status === 'complete' ? '✓' : stage.number}</span><div><strong>${esc(stage.label)}</strong><small>${esc(stage.status)}${stage.paid ? ' · may use a provider' : ''}${stage.error ? ` · ${esc(stage.error)}` : ''}</small></div><button class="ghost" data-run-step="${stage.number}">Run</button>${redo}</div>`;
 }
 
 function selectSetting(name,label,values,current) {
@@ -214,7 +217,13 @@ function sceneRow(slot,index) {
 function slotMedia(slot) {
   const motion = (slot.versions?.motion || []).at(-1)?.path;
   const still = (slot.versions?.stills || []).at(-1)?.path;
-  const path = slot.selected_motion || slot.selected_still || motion || still;
+  // While a new still is awaiting review, show that candidate rather than the
+  // previously approved still.  Otherwise regenerating an alternative appears
+  // to have done nothing in the Studio.
+  const reviewStill = slot.candidate_review?.selected_path;
+  const path = slot.status === 'motion_review'
+    ? (motion || slot.selected_motion || reviewStill || slot.selected_still || still)
+    : (slot.selected_motion || reviewStill || (slot.status === 'still_review' ? still : null) || slot.selected_still || motion || still);
   if (!path) return '<span>No visual asset yet</span>';
   const url = `/runs/${encodeURIComponent(state.active.run_id)}/${path}`;
   return /\.(mp4|webm|mov|m4v)$/i.test(path) ? `<video controls muted src="${url}"></video>` : `<img src="${url}">`;
@@ -224,7 +233,6 @@ function sceneInspector(slot) {
   const value = treatment(slot);
   const review = slot.candidate_review || {};
   return `<section class="card inspector" data-inspector="${esc(slot.slot_id)}"><div class="section-head"><div><span class="eyebrow">SELECTED BEAT</span><h2>${esc(slot.scene_id || slot.slot_id)}</h2></div><span class="badge">${esc(slot.status)}</span></div><div class="inspector-preview">${slotMedia(slot)}</div><p class="dialogue-quote">${esc(slot.transcript)}</p>
-    ${review.decision === 'reject_all' ? `<div class="fallback-warning"><strong>All generated candidates were rejected.</strong><br>Switch to a local graphic, keep the talking head, or revise the brief before generating again.</div>` : ''}
     <div class="simple-fields">
       <label>Visual treatment<select data-scene-field="visual_strategy">${['none','generated_photo','dental_diagram','editorial_graphic'].map(item => `<option value="${item}" ${item===value?'selected':''}>${treatmentLabel(item)}</option>`).join('')}</select></label>
       <label>Layout<select data-scene-field="layout_variant">${['talking_head','broll_top_speaker_bottom','speaker_top_broll_bottom','speaker_left_broll_right','broll_left_speaker_right','picture_in_picture','floating_visual','full_broll'].map(item => `<option value="${item}" ${item===slot.layout_variant?'selected':''}>${esc(item.replaceAll('_',' '))}</option>`).join('')}</select></label>
@@ -239,6 +247,7 @@ function sceneActionButtons(slot) {
   if (slot.status === 'suggested') buttons.push('<button class="slot-action approve" data-scene-action="approve_plan">Approve visual</button>');
   if (treatment(slot) !== 'none') buttons.push(`<button class="slot-action" data-generate-still>${(slot.versions?.stills || []).length ? 'Generate alternative' : 'Create visual'}</button>`);
   if (slot.status === 'still_review') buttons.push('<button class="slot-action approve" data-scene-action="approve_still">Approve visual</button>','<button class="slot-action reject" data-scene-action="reject_still">Reject latest</button>');
+  if (slot.status === 'motion_review') buttons.push('<button class="slot-action approve" data-scene-action="approve_motion">Approve motion</button>','<button class="slot-action" data-scene-action="use_still_only">Use still only</button>');
   if (treatment(slot) !== 'none') buttons.push('<button class="slot-action" data-scene-action="keep_talking_head">Keep doctor only</button>');
   return buttons.join('');
 }
@@ -272,12 +281,13 @@ function renderVisuals() {
   const report = budget();
   const slots = visualSlots();
   if (!slots.length) return '<div class="empty-state">No B-roll is required yet. That is valid—the doctor can remain full-screen.</div>';
-  return `<div class="stack"><section class="card"><div class="section-head"><div><span class="eyebrow">GENERATION PREFLIGHT</span><h2>Know the cost before creating anything</h2></div><span class="badge ${report.approved_for_generation === false ? 'bad' : 'good'}">${report.approved_for_generation === false ? 'Blocked' : 'Ready'}</span></div><div class="preflight"><div class="metric"><strong>${report.visual_scenes ?? slots.length}</strong><span>visual moments</span></div><div class="metric"><strong>${report.generated_photo_scenes ?? 0}</strong><span>AI photos</span></div><div class="metric"><strong>${report.local_graphic_scenes ?? 0}</strong><span>local graphics</span></div><div class="metric"><strong>${report.expected_image_generations ?? 0}</strong><span>image requests</span></div><div class="metric"><strong>${pct(report.visual_coverage_ratio)}</strong><span>B-roll exposure</span></div></div><p class="clean-note">Dental mechanisms and timing graphics are created locally. Only authentic lifestyle scenes use the image model.</p></section><section class="visual-grid">${slots.map(visualCard).join('')}</section></div>`;
+  return `<div class="stack"><section class="card"><div class="section-head"><div><span class="eyebrow">GENERATION PREFLIGHT</span><h2>Know the cost before creating anything</h2></div><span class="badge ${report.approved_for_generation === false ? 'bad' : 'good'}">${report.approved_for_generation === false ? 'Blocked' : 'Ready'}</span></div><div class="preflight"><div class="metric"><strong>${report.visual_scenes ?? slots.length}</strong><span>visual moments</span></div><div class="metric"><strong>${report.generated_photo_scenes ?? 0}</strong><span>AI photos</span></div><div class="metric"><strong>${report.generated_illustration_scenes ?? 0}</strong><span>AI illustrations</span></div><div class="metric"><strong>${report.expected_image_generations ?? 0}</strong><span>image requests</span></div><div class="metric"><strong>${pct(report.visual_coverage_ratio)}</strong><span>B-roll exposure</span></div></div><p class="clean-note">Every approved visual is generated by the configured image model, then reviewed before use.</p></section><section class="visual-grid">${slots.map(visualCard).join('')}</section></div>`;
 }
 
 function visualCard(slot) {
   const review = slot.candidate_review || {};
-  return `<article class="visual-card" data-visual-card="${esc(slot.slot_id)}"><div class="visual-media">${slotMedia(slot)}</div><div class="visual-copy"><div class="section-head"><strong>${treatmentLabel(treatment(slot))}</strong><span class="badge ${review.decision==='reject_all'?'bad':review.decision?'good':''}">${esc(review.decision || slot.status)}</span></div><p>${esc(slot.still_brief || slot.purpose)}</p><div class="visual-actions">${sceneActionButtons(slot)}</div></div></article>`;
+  const decision = review.decision === 'reject_all' ? 'ready for review' : (review.decision || slot.status);
+  return `<article class="visual-card" data-visual-card="${esc(slot.slot_id)}"><div class="visual-media">${slotMedia(slot)}</div><div class="visual-copy"><div class="section-head"><strong>${treatmentLabel(treatment(slot))}</strong><span class="badge ${review.decision?'good':''}">${esc(decision)}</span></div><p>${esc(slot.still_brief || slot.purpose)}</p><div class="visual-actions">${sceneActionButtons(slot)}</div></div></article>`;
 }
 function bindVisuals() {
   $$('[data-visual-card]').forEach(card => {
@@ -325,6 +335,7 @@ function renderExport() {
 
 function bindCommonActions() {
   $$('[data-run-step]').forEach(button => button.onclick=()=>startStep(Number(button.dataset.runStep)));
+  $$('[data-redo-step]').forEach(button => button.onclick=()=>redoFromStep(Number(button.dataset.redoStep)));
   $$('[data-run-through]').forEach(button => button.onclick=()=>startThrough(Number(button.dataset.runThrough)));
   const stop=$('[data-stop]'); if(stop) stop.onclick=()=>post(`/api/runs/${state.active.run_id}/stop`,{});
   const del=$('[data-delete]'); if(del) del.onclick=deleteRun;
@@ -338,6 +349,19 @@ async function startStep(step) {
   if(stage?.paid&&!confirmPaid)return;
   await post(`/api/runs/${state.active.run_id}/step`,{step,confirm_paid:confirmPaid});
 }
+async function redoFromStep(step) {
+  const stage=state.active.stages.find(item=>item.number===step);
+  const message=`Redo step ${step} (${stage?.label || 'selected step'}) from scratch?\n\nThis rewinds this step and every later step. Existing generated files are preserved in this production's history, then this step runs again without using its cache.`;
+  if(!confirm(message))return;
+  const confirmPaid=stage?.paid ? confirm(`Step ${step} may use a configured AI provider again. Continue?`) : false;
+  if(stage?.paid&&!confirmPaid)return;
+  try {
+    await api(`/api/runs/${state.active.run_id}/rewind`,{method:'POST',body:JSON.stringify({from_step:step})});
+    await api(`/api/runs/${state.active.run_id}/step`,{method:'POST',body:JSON.stringify({step,force:true,confirm_paid:confirmPaid})});
+    toast(`Rewound and restarted step ${step}`);
+    setTimeout(refreshActive,350);
+  } catch(error) { toast(error.message); }
+}
 async function startThrough(target) {
   const pending=state.active.stages.filter(stage=>stage.number<=target&&!['complete','skipped'].includes(stage.status));
   const paid=pending.some(stage=>stage.paid); const confirmPaid=paid?confirm('This may run one or more configured AI providers. Continue?'):false;
@@ -345,7 +369,7 @@ async function startThrough(target) {
   await post(`/api/runs/${state.active.run_id}/through`,{target_step:target,confirm_paid:confirmPaid});
 }
 async function slotAction(id,action,refresh=true){ await api(`/api/runs/${state.active.run_id}/slots/${id}/action`,{method:'POST',body:JSON.stringify({action})}); if(refresh)await selectRun(state.active.run_id); }
-async function regenerateStill(id){ if(!confirm('Create this visual now? Photographic scenes may use the image provider; dental and editorial graphics render locally.'))return; await post(`/api/runs/${state.active.run_id}/slots/${id}/regenerate-still`,{confirm_paid:true}); }
+async function regenerateStill(id){ if(!confirm('Create this visual with the configured image model now? This may use paid provider credits.'))return; await post(`/api/runs/${state.active.run_id}/slots/${id}/regenerate-still`,{confirm_paid:true}); }
 async function saveSimpleSettings(){ const settings={};$$('[data-simple-setting]').forEach(field=>settings[field.dataset.simpleSetting]=field.dataset.simpleSetting==='image_candidates_per_slot'?Number(field.value):field.value);await api(`/api/runs/${state.active.run_id}/settings`,{method:'PUT',body:JSON.stringify({settings})});toast('Settings saved. Rewind from step 6 before rebuilding the plan.');await selectRun(state.active.run_id); }
 async function post(url,body,refresh=false){ try{await api(url,{method:'POST',body:JSON.stringify(body)});toast('Started');if(refresh)await selectRun(state.active.run_id);else setTimeout(refreshActive,350);}catch(error){toast(error.message);} }
 async function refreshLog(){try{$('#log').textContent=(await api(`/api/runs/${state.active.run_id}/log`))||'No activity yet.';}catch{}}

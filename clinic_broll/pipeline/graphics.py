@@ -20,30 +20,35 @@ def render_local_graphic(path: Path, slot: dict[str, Any], *, width: int, height
         str(slot.get(key) or "")
         for key in ("transcript", "purpose", "still_brief", "text_overlay")
     ).lower()
-    image = _background(width, height)
+    # Render oversized then downsample.  Pillow's vector-like primitives are
+    # otherwise visibly jagged on vertical video canvases, particularly on
+    # tooth contours and fine bristles.
+    scale = 2
+    render_width, render_height = width * scale, height * scale
+    image = _background(render_width, render_height)
     draw = ImageDraw.Draw(image, "RGBA")
     if strategy == "dental_diagram":
         if any(token in text for token in ("brush", "bristle", "abrasion", "sandpaper", "ബ്രഷ")):
             kind = "brush_friction"
-            _brush_friction(draw, width, height)
+            _brush_friction(draw, render_width, render_height)
         elif any(token in text for token in ("saliva", "neutral", "buffer", "ph", "acid", "ആസിഡ")):
             kind = "acid_buffer"
-            _acid_buffer(draw, width, height)
+            _acid_buffer(draw, render_width, render_height)
         else:
             kind = "tooth_layers"
-            _tooth_layers(draw, width, height)
+            _tooth_layers(draw, render_width, render_height)
     else:
         if any(token in text for token in ("wait", "minute", "clock", "30", "60", "കാത്തിര", "മിനിറ്റ്")):
             kind = "clock"
-            _clock(draw, width, height)
+            _clock(draw, render_width, render_height)
         elif any(token in text for token in ("avoid", "warning", "immediately", "ഉടനെ")):
             kind = "pause_brush"
-            _pause_brush(draw, width, height)
+            _pause_brush(draw, render_width, render_height)
         else:
             kind = "simple_steps"
-            _simple_steps(draw, width, height)
+            _simple_steps(draw, render_width, render_height)
     path.parent.mkdir(parents=True, exist_ok=True)
-    image.save(path, format="PNG", optimize=True)
+    image.resize((width, height), Image.Resampling.LANCZOS).save(path, format="PNG", optimize=True)
     return {"provider": "local_graphic", "kind": kind, "path": str(path)}
 
 
@@ -75,9 +80,20 @@ def _tooth_shape(cx: float, cy: float, scale: float) -> list[tuple[float, float]
     ]
 
 
+def _clinical_card(draw: ImageDraw.ImageDraw, width: int, height: int) -> tuple[float, float, float, float]:
+    """Give split-layout graphics a deliberate lower-panel composition."""
+    bounds = (width * 0.08, height * 0.42, width * 0.92, height * 0.90)
+    shadow = tuple(value + offset for value, offset in zip(bounds, (0, height * 0.012, 0, height * 0.012)))
+    radius = int(min(width, height) * 0.045)
+    draw.rounded_rectangle(shadow, radius=radius, fill=(47, 88, 82, 24))
+    draw.rounded_rectangle(bounds, radius=radius, fill=(255, 255, 252, 238), outline=(190, 220, 214, 255), width=max(2, int(width * 0.003)))
+    return bounds
+
+
 def _tooth_layers(draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
-    scale = min(width, height) * 0.50
-    cx, cy = width * 0.50, height * 0.50
+    _clinical_card(draw, width, height)
+    scale = min(width, height) * 0.31
+    cx, cy = width * 0.50, height * 0.66
     outer = _tooth_shape(cx, cy, scale)
     draw.polygon(outer, fill=(255, 255, 252, 255), outline=(36, 109, 105, 255))
     inner = _tooth_shape(cx, cy + scale * 0.03, scale * 0.78)
@@ -88,39 +104,46 @@ def _tooth_layers(draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
 
 
 def _acid_buffer(draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
-    scale = min(width, height) * 0.42
-    cx, cy = width * 0.50, height * 0.53
-    draw.polygon(_tooth_shape(cx, cy, scale), fill=(255, 255, 252, 255), outline=(39, 111, 107, 255))
-    for index in range(11):
+    _clinical_card(draw, width, height)
+    scale = min(width, height) * 0.31
+    cx, cy = width * 0.50, height * 0.67
+    outer = _tooth_shape(cx, cy, scale)
+    draw.polygon(outer, fill=(255, 255, 252, 255), outline=(32, 121, 114, 255), width=max(3, int(scale * 0.012)))
+    enamel = _tooth_shape(cx, cy + scale * 0.02, scale * 0.82)
+    draw.polygon(enamel, fill=(248, 229, 178, 255), outline=(221, 180, 101, 255), width=max(2, int(scale * 0.008)))
+    for index in range(9):
         angle = math.pi * (0.15 + 0.07 * index)
         radius = scale * (0.62 + 0.08 * (index % 3))
         x = cx + math.cos(angle) * radius
-        y = cy - scale * 0.35 + math.sin(angle) * radius * 0.35
-        r = scale * 0.035
-        draw.ellipse((x - r, y - r, x + r, y + r), fill=(242, 127, 79, 190))
-    arc_box = (cx - scale * 0.78, cy - scale * 0.86, cx + scale * 0.78, cy + scale * 0.70)
-    draw.arc(arc_box, 205, 335, fill=(50, 188, 175, 255), width=max(5, int(scale * 0.025)))
+        y = cy - scale * 0.46 + math.sin(angle) * radius * 0.26
+        r = scale * 0.026
+        draw.ellipse((x - r, y - r, x + r, y + r), fill=(242, 139, 91, 180))
+    arc_box = (cx - scale * 0.72, cy - scale * 0.82, cx + scale * 0.72, cy + scale * 0.46)
+    draw.arc(arc_box, 205, 335, fill=(50, 188, 175, 255), width=max(5, int(scale * 0.024)))
     for offset in (-0.25, 0, 0.25):
         x = cx + offset * scale
-        y = cy - scale * 0.67
-        r = scale * 0.045
+        y = cy - scale * 0.70
+        r = scale * 0.038
         draw.ellipse((x - r, y - r, x + r, y + r), fill=(65, 198, 187, 180))
 
 
 def _brush_friction(draw: ImageDraw.ImageDraw, width: int, height: int) -> None:
-    scale = min(width, height) * 0.40
-    cx, cy = width * 0.52, height * 0.59
-    draw.polygon(_tooth_shape(cx, cy, scale), fill=(255, 255, 252, 255), outline=(42, 111, 108, 255))
+    _clinical_card(draw, width, height)
+    scale = min(width, height) * 0.30
+    cx, cy = width * 0.52, height * 0.70
+    outer = _tooth_shape(cx, cy, scale)
+    draw.polygon(outer, fill=(255, 255, 252, 255), outline=(42, 111, 108, 255), width=max(3, int(scale * 0.012)))
+    draw.polygon(_tooth_shape(cx, cy + scale * 0.02, scale * 0.82), fill=(249, 231, 184, 255), outline=(221, 180, 101, 255), width=max(2, int(scale * 0.008)))
     handle_h = max(24, int(scale * 0.12))
-    x0, y0 = width * 0.08, height * 0.25
-    x1, y1 = width * 0.72, y0 + handle_h
+    x0, y0 = width * 0.15, height * 0.50
+    x1, y1 = width * 0.70, y0 + handle_h
     draw.rounded_rectangle((x0, y0, x1, y1), radius=handle_h // 2, fill=(45, 184, 174, 255))
     head_x0 = width * 0.57
-    head_x1 = width * 0.90
+    head_x1 = width * 0.85
     draw.rounded_rectangle((head_x0, y0 - handle_h * 0.30, head_x1, y1 + handle_h * 0.30), radius=handle_h // 2, fill=(235, 239, 240, 255), outline=(45, 111, 108, 255))
     for index in range(9):
         x = head_x0 + (index + 0.7) * (head_x1 - head_x0) / 10
-        draw.line((x, y1, x - scale * 0.03, y1 + scale * 0.16), fill=(61, 126, 150, 255), width=max(3, int(scale * 0.012)))
+        draw.line((x, y1, x - scale * 0.025, y1 + scale * 0.14), fill=(61, 126, 150, 255), width=max(3, int(scale * 0.012)))
     for offset in (-0.13, 0.0, 0.13):
         x = cx + offset * scale
         y = cy - scale * 0.49

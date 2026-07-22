@@ -108,8 +108,8 @@ def test_motion_media_is_a_direct_hyperframes_clip():
     })
     section_end = document.index("</section>", document.index('id="broll_001"'))
     video_at = document.index('id="broll_001-media"')
-    assert video_at > section_end
-    assert 'class="generated generated-track clip right_panel"' in document
+    assert video_at < section_end
+    assert 'class="generated generated-track clip"' in document
 
 
 def test_final_composition_is_a_transparent_overlay_without_master_video():
