@@ -4,7 +4,12 @@ from clinic_broll.pipeline.dialogue import (
     _detect_candidates,
     _normalise_plan,
     _timeline_map,
+    create_manual_removal,
 )
+from clinic_broll.core import paths as paths_module
+from clinic_broll.core.io import read_json, write_json
+from clinic_broll.core.state import create_run
+from clinic_broll.pipeline import dialogue
 
 
 def _transcript():
@@ -66,8 +71,72 @@ def test_timeline_map_accounts_for_crossfade_overlap():
     assert mapping[1]["clean_start"] == 1.975
 
 
-def test_ffmpeg_filter_uses_audio_and_video_continuity_fades(tmp_path):
+def test_ffmpeg_filter_uses_frame_accurate_video_cuts_and_audio_fades(tmp_path):
     args = _clean_master_args(tmp_path / "source.mp4", [(0.0, 2.0), (3.0, 5.0)], 0.025, tmp_path / "out.mp4")
     graph = args[args.index("-filter_complex") + 1]
-    assert "xfade=transition=fade" in graph
     assert "acrossfade" in graph
+    assert "xfade" not in graph
+    assert "trim=start=0.000000:end=1.975000" in graph
+    assert "[v0][v1]concat=n=2:v=1:a=0[vcat]" in graph
+    assert "[0:v]split=2[vin0][vin1]" in graph
+    assert "[0:a]asplit=2[ain0][ain1]" in graph
+    assert graph.count("fps=30,settb=AVTB,setpts=PTS-STARTPTS") == 2
+
+
+def test_ffmpeg_filter_uses_source_frame_rate_for_each_trimmed_branch(tmp_path):
+    args = _clean_master_args(
+        tmp_path / "source.mp4",
+        [(0.0, 2.0), (3.0, 5.0), (6.0, 8.0)],
+        0.025,
+        tmp_path / "out.mp4",
+        fps=29.97,
+    )
+    graph = args[args.index("-filter_complex") + 1]
+    assert graph.count("fps=29.97,settb=AVTB,setpts=PTS-STARTPTS") == 3
+
+
+def test_operator_can_add_approved_manual_removal(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths_module, "RUNS_ROOT", tmp_path)
+    create_run("manual-dialogue", original_filename="source.mp4")
+    root = tmp_path / "manual-dialogue"
+    write_json(root / "dialogue" / "edit-plan.json", {
+        "version": "1.0", "source_duration": 8.0, "edits": [],
+    })
+    write_json(root / "dialogue" / "source-transcript.json", _transcript())
+
+    edit = create_manual_removal("manual-dialogue", start=0.58, end=1.28)
+
+    assert edit["category"] == "manual"
+    assert edit["status"] == "approved"
+    assert edit["resolved_action"] == "remove"
+    assert edit["transcript"] == "brush brush"
+    assert read_json(root / "dialogue" / "edit-plan.json")["edits"] == [edit]
+
+
+def test_full_narration_analysis_runs_without_deterministic_leads(tmp_path, monkeypatch):
+    monkeypatch.setattr(paths_module, "RUNS_ROOT", tmp_path)
+    create_run("full-audit", original_filename="source.mp4")
+    root = tmp_path / "full-audit"
+    transcript = {
+        "duration_seconds": 2.0,
+        "language_code": "ml",
+        "words": [
+            {"word": "നല്ല", "start": 0.1, "end": 0.4},
+            {"word": "വാചകം", "start": 0.45, "end": 0.8},
+        ],
+        "phrases": [{"text": "നല്ല വാചകം", "start": 0.1, "end": 0.8}],
+    }
+    write_json(root / "dialogue" / "source-transcript.json", transcript)
+    calls = []
+
+    def fake_call_task_json(**kwargs):
+        calls.append(kwargs)
+        return {"summary": "Full audit complete", "edits": []}
+
+    monkeypatch.setattr(dialogue, "call_task_json", fake_call_task_json)
+
+    dialogue.run_analysis("full-audit")
+
+    assert len(calls) == 1
+    assert "ENTIRE" in calls[0]["system"]
+    assert "do not restrict" in calls[0]["user"]

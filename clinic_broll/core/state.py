@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shutil
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -265,6 +266,7 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
     meta = load_run(run_id)
     plan_path = paths.plan / "broll_plan.json"
     plan = read_json(plan_path)
+    clean_master_had_run = stage_record(meta, 4)["status"] != "pending"
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     history_root = paths.history / f"rewind-from-{from_stage}-{stamp}"
     history_root.mkdir(parents=True, exist_ok=True)
@@ -278,10 +280,21 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
             write_json(history_root / (Path(relative).name + ".before.json"), payload)
 
     for number in range(from_stage, max(STAGE_BY_NUMBER) + 1):
-        for relative in STAGE_OUTPUTS.get(number, ()):
-            safe_move_to_history(paths.root / relative, history_root / f"stage-{number:02d}")
         record = stage_record(meta, number)
+        # Clear an explicitly selected stage even if its metadata is pending,
+        # except step 4: its paths overlap step 1/2 until clean-master has run.
+        should_archive = record["status"] != "pending" or (number == from_stage and number != 4)
+        if should_archive:
+            for relative in STAGE_OUTPUTS.get(number, ()):
+                safe_move_to_history(paths.root / relative, history_root / f"stage-{number:02d}")
         record.update({"status": "pending", "started_at": None, "completed_at": None, "error": None, "artifacts": []})
+
+    # Step 4 replaces the canonical source and transcript with their cleaned
+    # versions. A rewind beginning at step 3 or 4 archives those replacements,
+    # so restore the immutable step 1/2 material instead of leaving those
+    # completed stages without their outputs.
+    if 3 <= from_stage <= 4 and clean_master_had_run:
+        _restore_dialogue_source_backups(paths)
 
     # Keep the editorial plan when rewinding only generated assets, but reset every
     # cached selection that points into the archived directories.
@@ -318,6 +331,22 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
     append_log(paths, f"Rewound from V2 stage {from_stage}; prior artifacts saved in {history_root.name}")
     save_run(meta)
     return meta
+
+
+def _restore_dialogue_source_backups(paths: RunPaths) -> None:
+    pairs = (
+        (paths.dialogue / "source-master.mp4", paths.source / "master.mp4"),
+        (paths.dialogue / "source-proxy.mp4", paths.source / "proxy.mp4"),
+        (paths.dialogue / "source-speech.wav", paths.source / "speech.wav"),
+        (paths.dialogue / "source-metadata.json", paths.source / "metadata.json"),
+        (paths.dialogue / "source-transcript.json", paths.transcript / "transcript.json"),
+        (paths.dialogue / "source-captions.srt", paths.transcript / "captions.srt"),
+    )
+    for source, destination in pairs:
+        if not source.exists():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, destination)
 
 
 def list_runs() -> list[dict[str, Any]]:

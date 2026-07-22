@@ -20,7 +20,7 @@
           "end": {"type": "number", "minimum": 0},
           "category": {
             "type": "string",
-            "enum": ["filler", "repeated_word", "repeated_sentence", "false_start", "long_pause", "mouth_noise", "other"]
+            "enum": ["filler", "repeated_word", "repeated_phrase", "repeated_sentence", "redundant_phrase", "redundant_sentence", "false_start", "retake", "tangent", "long_pause", "mouth_noise", "manual", "other"]
           },
           "transcript": {"type": "string", "maxLength": 1200},
           "recommended_action": {

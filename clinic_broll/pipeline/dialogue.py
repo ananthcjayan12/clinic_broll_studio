@@ -40,7 +40,7 @@ def run_analysis(run_id: str) -> dict[str, Any]:
     paths.dialogue.mkdir(parents=True, exist_ok=True)
     deterministic = _detect_candidates(transcript, mode)
     payload = {"summary": f"Deterministic {mode} dialogue cleanup", "edits": deterministic}
-    if mode != "off" and deterministic:
+    if mode != "off":
         selection = meta["settings"]["task_models"]["dialogue_editor"]
         system = load_prompt("dialogue_editor.system.txt")
         user = load_prompt("dialogue_editor.user.txt").format(
@@ -110,7 +110,13 @@ def run_clean_master(run_id: str) -> dict[str, Any]:
     if removals:
         append_log(paths, f"Clean master: removing {len(removals)} approved ranges with {crossfade * 1000:.0f} ms continuity fades")
         run_ffmpeg(
-            _clean_master_args(source_master, keep_ranges, crossfade, master),
+            _clean_master_args(
+                source_master,
+                keep_ranges,
+                crossfade,
+                master,
+                fps=float(source_meta.get("fps") or 30),
+            ),
             paths=paths,
             label="Render clean talking-head master",
             duration=duration,
@@ -203,6 +209,53 @@ def update_edit(run_id: str, edit_id: str, updates: dict[str, Any]) -> dict[str,
     return edit
 
 
+def create_manual_removal(
+    run_id: str,
+    *,
+    start: float,
+    end: float,
+    transcript: str = "",
+    reason: str = "Removed manually by the operator",
+) -> dict[str, Any]:
+    paths = run_paths(run_id)
+    plan = read_json(paths.dialogue / "edit-plan.json")
+    if not plan:
+        raise FileNotFoundError("Dialogue edit plan is missing")
+    duration = float(plan.get("source_duration") or 0)
+    start = max(0.0, float(start))
+    end = min(duration, float(end)) if duration > 0 else float(end)
+    if end - start < 0.03:
+        raise ValueError("Manual removal must be at least 0.03 seconds")
+    if not transcript.strip():
+        transcript = _transcript_excerpt(_source_transcript(paths), start, end)
+    existing_ids = {
+        int(match.group(1))
+        for item in plan.get("edits", [])
+        if (match := re.fullmatch(r"edit_(\d+)", str(item.get("edit_id") or "")))
+    }
+    next_number = max(existing_ids, default=0) + 1
+    edit = {
+        "edit_id": f"edit_{next_number:04d}",
+        "start": round(start, 3),
+        "end": round(end, 3),
+        "duration": round(end - start, 3),
+        "category": "manual",
+        "transcript": transcript.strip() or "[operator-selected range]",
+        "recommended_action": "remove",
+        "target_pause_seconds": None,
+        "confidence": 1.0,
+        "reason": reason.strip() or "Removed manually by the operator",
+        "medical_risk": "none",
+        "requires_review": False,
+        "status": "approved",
+        "resolved_action": "remove",
+    }
+    plan.setdefault("edits", []).append(edit)
+    plan["edits"].sort(key=lambda item: (float(item["start"]), float(item["end"])))
+    write_json(paths.dialogue / "edit-plan.json", plan)
+    return edit
+
+
 def resolve_edit(run_id: str, edit_id: str, action: str) -> dict[str, Any]:
     paths = run_paths(run_id)
     plan = read_json(paths.dialogue / "edit-plan.json")
@@ -271,6 +324,18 @@ def _compact_transcript(transcript: dict[str, Any]) -> dict[str, Any]:
         "phrases": transcript.get("phrases"),
         "words": transcript.get("words"),
     }
+
+
+def _transcript_excerpt(transcript: dict[str, Any], start: float, end: float) -> str:
+    selected = []
+    for word in transcript.get("words") or []:
+        word_start = float(word.get("start") or 0)
+        word_end = float(word.get("end") or word_start)
+        if word_end > start and word_start < end:
+            token = str(word.get("word") or "").strip()
+            if token:
+                selected.append(token)
+    return " ".join(selected)
 
 
 def _detect_candidates(transcript: dict[str, Any], mode: str) -> list[dict[str, Any]]:
@@ -443,35 +508,53 @@ def _complement_ranges(removals: list[tuple[float, float]], duration: float) -> 
     return keep
 
 
-def _clean_master_args(source: Path, keep_ranges: list[tuple[float, float]], crossfade: float, output: Path) -> list[str]:
+def _clean_master_args(
+    source: Path,
+    keep_ranges: list[tuple[float, float]],
+    crossfade: float,
+    output: Path,
+    *,
+    fps: float = 30,
+) -> list[str]:
     filters: list[str] = []
-    durations = []
+    stable_fps = max(1.0, fps)
+    branch_count = len(keep_ranges)
+    video_inputs = "".join(f"[vin{index}]" for index in range(branch_count))
+    audio_inputs = "".join(f"[ain{index}]" for index in range(branch_count))
+    filters.append(f"[0:v]split={branch_count}{video_inputs}")
+    filters.append(f"[0:a]asplit={branch_count}{audio_inputs}")
     for index, (start, end) in enumerate(keep_ranges):
-        durations.append(end - start)
-        filters.append(f"[0:v]trim=start={start:.6f}:end={end:.6f},setpts=PTS-STARTPTS[v{index}]")
-        filters.append(f"[0:a]atrim=start={start:.6f}:end={end:.6f},asetpts=PTS-STARTPTS[a{index}]")
+        # The audio overlap determines the clean timeline. Drop the equivalent
+        # amount from each preceding video branch so its hard cuts stay in sync.
+        # A 25 ms video dissolve is shorter than one frame at the studio's 30 fps,
+        # while chained xfade outputs lose their frame-rate metadata in FFmpeg 7.
+        video_end = end - (crossfade if index < branch_count - 1 else 0.0)
+        filters.append(
+            f"[vin{index}]trim=start={start:.6f}:end={video_end:.6f},"
+            f"fps={stable_fps:g},settb=AVTB,setpts=PTS-STARTPTS[v{index}]"
+        )
+        filters.append(
+            f"[ain{index}]atrim=start={start:.6f}:end={end:.6f},"
+            f"asetpts=PTS-STARTPTS[a{index}]"
+        )
     if len(keep_ranges) == 1:
         video_label, audio_label = "[v0]", "[a0]"
-    elif crossfade <= 0:
-        inputs = "".join(f"[v{index}][a{index}]" for index in range(len(keep_ranges)))
-        filters.append(f"{inputs}concat=n={len(keep_ranges)}:v=1:a=1[vcat][acat]")
-        video_label, audio_label = "[vcat]", "[acat]"
     else:
-        video_label = "[v0]"
-        audio_label = "[a0]"
-        cumulative = durations[0]
-        for index in range(1, len(keep_ranges)):
-            next_video = f"[vx{index}]"
-            next_audio = f"[ax{index}]"
-            offset = max(0.0, cumulative - crossfade)
-            filters.append(
-                f"{video_label}[v{index}]xfade=transition=fade:duration={crossfade:.6f}:offset={offset:.6f}{next_video}"
-            )
-            filters.append(
-                f"{audio_label}[a{index}]acrossfade=d={crossfade:.6f}:c1=tri:c2=tri{next_audio}"
-            )
-            cumulative += durations[index] - crossfade
-            video_label, audio_label = next_video, next_audio
+        inputs = "".join(f"[v{index}][a{index}]" for index in range(len(keep_ranges)))
+        if crossfade <= 0:
+            filters.append(f"{inputs}concat=n={len(keep_ranges)}:v=1:a=1[vcat][acat]")
+            video_label, audio_label = "[vcat]", "[acat]"
+        else:
+            video_only_inputs = "".join(f"[v{index}]" for index in range(len(keep_ranges)))
+            filters.append(f"{video_only_inputs}concat=n={len(keep_ranges)}:v=1:a=0[vcat]")
+            audio_label = "[a0]"
+            for index in range(1, len(keep_ranges)):
+                next_audio = f"[ax{index}]"
+                filters.append(
+                    f"{audio_label}[a{index}]acrossfade=d={crossfade:.6f}:c1=tri:c2=tri{next_audio}"
+                )
+                audio_label = next_audio
+            video_label = "[vcat]"
     return [
         "-i", str(source), "-filter_complex", ";".join(filters),
         "-map", video_label, "-map", audio_label,

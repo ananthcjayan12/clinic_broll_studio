@@ -3,7 +3,7 @@ Cleanup mode: {mode}
 SOURCE MALAYALAM/CODE-MIXED TRANSCRIPT WITH WORD TIMING
 {transcript}
 
-DETERMINISTIC CANDIDATES
+DETERMINISTIC LEADS (do not restrict your full-narration audit to these)
 {candidates}
 
-Review every candidate. Return a concise summary and an edits array. Each edit must use one action: remove, shorten_pause, keep, or manual_review. Mark any clinically meaningful or uncertain edit as requires_review=true.
+Read the entire timed transcript before deciding. Return a concise professional edit summary and every proposed removal or pause shortening needed to turn this recording into a polished narration. Detect unwanted sentences and phrases even when they do not appear in the deterministic leads. Avoid overlapping duplicate proposals. Each edit must use remove, shorten_pause, or manual_review. Mark any clinically meaningful, uncertain, or transition-sensitive edit as requires_review=true.
