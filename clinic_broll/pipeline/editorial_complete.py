@@ -6,6 +6,7 @@ from ..core.io import read_json, write_json
 from ..core.paths import run_paths
 from ..core.state import append_log, load_run
 from . import editorial
+from .editorial_policy import budget_report
 
 
 def run(run_id: str) -> dict[str, Any]:
@@ -18,17 +19,21 @@ def run(run_id: str) -> dict[str, Any]:
     duration = float(plan.get("duration_seconds") or transcript.get("duration_seconds") or 0)
     fps = int(plan.get("fps") or meta["settings"].get("fps") or 30)
     filled = fill_timeline(plan.get("scenes") or [], transcript.get("phrases") or [], duration, fps)
+    hidden = sum(1 for scene in filled if not scene.get("operator_visible", True))
     if len(filled) != len(plan.get("scenes") or []):
-        append_log(paths, f"Editorial continuity: inserted {len(filled) - len(plan.get('scenes') or [])} talking-head gap scenes")
+        append_log(paths, f"Editorial continuity: inserted {hidden} hidden talking-head continuity ranges")
     plan["scenes"] = filled
     plan["continuous_coverage"] = True
+    plan["budget_report"] = budget_report(filled, duration, meta["settings"])
     write_json(paths.editorial / "editorial-plan.json", plan)
     compatibility = editorial.editorial_to_broll_plan(plan, bible)
     write_json(paths.plan / "broll_plan.json", compatibility)
     result["summary"] = {
         **(result.get("summary") or {}),
-        "scenes": len(filled),
+        "scenes": len([scene for scene in filled if scene.get("operator_visible", True)]),
+        "hidden_continuity_ranges": hidden,
         "continuous_coverage": True,
+        "budget_report": plan["budget_report"],
     }
     return result
 
@@ -58,6 +63,7 @@ def fill_timeline(
             adjusted["duration"] = round(end - start, 3)
             adjusted["start_frame"] = round(start * fps)
             adjusted["end_frame"] = round(end * fps)
+            adjusted.setdefault("operator_visible", True)
             filled.append(adjusted)
             cursor = end
     if duration - cursor > tolerance:
@@ -89,6 +95,7 @@ def _talking_head_gap(start: float, end: float, phrases: list[dict[str, Any]], f
         "layout_variant": "talking_head",
         "subject_mode": "original",
         "visual_style": "natural_lifestyle",
+        "visual_strategy": "none",
         "visual_brief": "",
         "motion_brief": "",
         "text_overlay": "",
@@ -100,4 +107,5 @@ def _talking_head_gap(start: float, end: float, phrases: list[dict[str, Any]], f
         "sound_intent": [],
         "priority": "optional",
         "safety": ["Preserve the original talking-head video and narration"],
+        "operator_visible": False,
     }
