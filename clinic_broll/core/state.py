@@ -189,7 +189,6 @@ def _migrate_meta(meta: dict[str, Any]) -> bool:
     if current_keys != desired_keys:
         existing = {str(item.get("key")): item for item in meta.get("stages", [])}
         rebuilt: list[dict[str, Any]] = []
-        # Preserve source, transcript, dialogue cleanup, clean master and local analysis.
         preserve = {"ingest", "transcribe", "dialogue_analysis", "clean_master", "analyze"}
         for stage in STAGES:
             if stage.key in existing and stage.key in preserve:
@@ -264,6 +263,8 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
         raise ValueError("Unknown stage")
     paths = run_paths(run_id)
     meta = load_run(run_id)
+    plan_path = paths.plan / "broll_plan.json"
+    plan = read_json(plan_path)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     history_root = paths.history / f"rewind-from-{from_stage}-{stamp}"
     history_root.mkdir(parents=True, exist_ok=True)
@@ -281,6 +282,28 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
             safe_move_to_history(paths.root / relative, history_root / f"stage-{number:02d}")
         record = stage_record(meta, number)
         record.update({"status": "pending", "started_at": None, "completed_at": None, "error": None, "artifacts": []})
+
+    # Keep the editorial plan when rewinding only generated assets, but reset every
+    # cached selection that points into the archived directories.
+    if plan and from_stage > 6:
+        for slot in plan.get("slots", []):
+            if from_stage <= 8:
+                slot.setdefault("versions", {})["stills"] = []
+                slot.setdefault("versions", {})["motion"] = []
+                slot["selected_still"] = None
+                slot["selected_motion"] = None
+                slot["candidate_review"] = None
+                if slot.get("status") not in {"rejected", "talking_head"}:
+                    slot["status"] = "plan_approved"
+                slot.setdefault("review", {})["still"] = None
+                slot.setdefault("review", {})["motion"] = None
+            elif from_stage <= 10:
+                slot.setdefault("versions", {})["motion"] = []
+                slot["selected_motion"] = None
+                if slot.get("status") not in {"rejected", "talking_head"}:
+                    slot["status"] = "still_approved" if slot.get("selected_still") else "plan_approved"
+                slot.setdefault("review", {})["motion"] = None
+        write_json(plan_path, plan)
 
     if from_stage <= 3:
         meta["approvals"]["dialogue"] = False
