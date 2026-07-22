@@ -1,0 +1,9 @@
+Cleanup mode: {mode}
+
+SOURCE MALAYALAM/CODE-MIXED TRANSCRIPT WITH WORD TIMING
+{transcript}
+
+DETERMINISTIC CANDIDATES
+{candidates}
+
+Review every candidate. Return a concise summary and an edits array. Each edit must use one action: remove, shorten_pause, keep, or manual_review. Mark any clinically meaningful or uncertain edit as requires_review=true.
