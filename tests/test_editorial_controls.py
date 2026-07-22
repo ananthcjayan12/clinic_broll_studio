@@ -34,7 +34,7 @@ def test_broll_only_is_full_screen_without_foreground_layer():
         "slots": [_slot()],
     })
     assert ".broll_only .panel{display:none}" in document
-    assert ".generated.broll_only{inset:0;width:100%;height:100%" in document
+    assert ".broll_only .generated{inset:0;width:100%;height:100%" in document
     assert "foreground.webm" not in document
 
 
