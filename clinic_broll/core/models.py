@@ -33,12 +33,13 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
 }
 
 TASK_CATALOG: dict[str, dict[str, Any]] = {
-    "broll_analysis": {"label": "B-roll opportunity analysis", "stage": 4},
-    "slot_refinement": {"label": "Slot refinement", "stage": 4},
-    "image_prompt": {"label": "Still-image visual direction", "stage": 6},
-    "motion_prompt": {"label": "Image-to-video motion direction", "stage": 8},
-    "semantic_qa": {"label": "Semantic and clinical QA", "stage": 11},
-    "repair_advisor": {"label": "Targeted repair advisor", "stage": 11},
+    "dialogue_editor": {"label": "Dialogue cleanup and continuity", "stage": 3},
+    "broll_analysis": {"label": "B-roll opportunity analysis", "stage": 6},
+    "slot_refinement": {"label": "Slot refinement", "stage": 6},
+    "image_prompt": {"label": "Still-image visual direction", "stage": 8},
+    "motion_prompt": {"label": "Image-to-video motion direction", "stage": 10},
+    "semantic_qa": {"label": "Semantic and clinical QA", "stage": 13},
+    "repair_advisor": {"label": "Targeted repair advisor", "stage": 13},
 }
 
 DEFAULT_MODEL_MAP: dict[str, dict[str, str]] = {
