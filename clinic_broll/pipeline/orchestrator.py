@@ -5,8 +5,21 @@ from typing import Any, Callable
 
 from ..core.paths import run_paths
 from ..core.state import STAGE_BY_NUMBER, append_log, load_run, mark_stage, next_incomplete, stage_record
-from . import analyze, dialogue, final_render, ingest, matte, motion, plan, preview, qa, stills, transcribe
-
+from . import (
+    analyze,
+    choreography,
+    dialogue,
+    editorial,
+    final_render,
+    ingest,
+    motion,
+    preparation,
+    preview,
+    qa,
+    sound,
+    stills,
+    transcribe,
+)
 
 _STAGE_RUNNERS: dict[int, Callable[[str], dict[str, Any]]] = {
     1: ingest.run,
@@ -14,14 +27,16 @@ _STAGE_RUNNERS: dict[int, Callable[[str], dict[str, Any]]] = {
     3: dialogue.run_analysis,
     4: dialogue.run_clean_master,
     5: analyze.run,
-    6: plan.run,
-    7: matte.run,
+    6: editorial.run,
+    7: preparation.run,
     8: stills.run,
     9: preview.run_still,
     10: motion.run,
-    11: preview.run_motion,
-    12: final_render.run,
-    13: qa.run,
+    11: choreography.run,
+    12: sound.run,
+    13: preview.run_complete,
+    14: final_render.run,
+    15: qa.run,
 }
 
 
@@ -37,7 +52,8 @@ def run_stage(run_id: str, stage_number: int, *, force: bool = False, confirm_pa
         return meta
     if stage.paid and not confirm_paid:
         raise RuntimeError(
-            f"Stage {stage_number} ({stage.label}) may use an API or subscription quota; rerun with explicit paid/provider-usage confirmation"
+            f"Stage {stage_number} ({stage.label}) may use an API or subscription quota; "
+            "rerun with explicit paid/provider-usage confirmation"
         )
     _check_gate(meta, stage_number)
     append_log(paths, f"START stage {stage.number}: {stage.label}")
@@ -75,36 +91,55 @@ def run_through(run_id: str, target_stage: int, *, force: bool = False, confirm_
 
 
 def _check_gate(meta: dict[str, Any], stage_number: int) -> None:
+    from ..core.io import read_json
+
     paths = run_paths(meta["run_id"])
     if stage_number > 1:
         previous = stage_record(meta, stage_number - 1)
         if previous["status"] not in {"complete", "skipped"}:
             raise RuntimeError(f"Stage {stage_number - 1} must complete first")
-    if stage_number == 4:
-        from ..core.io import read_json
 
+    if stage_number == 4:
         dialogue_plan = read_json(paths.dialogue / "edit-plan.json", {"edits": []})
         unresolved = [
             edit.get("edit_id") for edit in dialogue_plan.get("edits", [])
             if edit.get("status") not in {"approved", "kept"}
         ]
         if unresolved:
-            raise RuntimeError("Resolve every dialogue cleanup proposal first: " + ", ".join(str(item) for item in unresolved))
+            raise RuntimeError(
+                "Resolve every dialogue cleanup proposal first: "
+                + ", ".join(str(item) for item in unresolved)
+            )
+
+    if stage_number == 7:
+        plan_payload = read_json(paths.plan / "broll_plan.json", {"slots": []})
+        unresolved = [
+            slot.get("slot_id") for slot in plan_payload.get("slots", [])
+            if slot.get("status") == "suggested"
+        ]
+        if unresolved or not meta.get("approvals", {}).get("editorial"):
+            raise RuntimeError(
+                "Approve, reject, or keep talking head for every Editorial Director scene before preparation"
+            )
+
     if stage_number == 8:
-        from ..core.io import read_json
-
         plan_payload = read_json(paths.plan / "broll_plan.json", {"slots": []})
-        if not any(slot.get("status") == "plan_approved" for slot in plan_payload.get("slots", [])):
-            raise RuntimeError("Approve at least one B-roll plan slot before generating stills")
+        visual_slots = [slot for slot in plan_payload.get("slots", []) if slot.get("status") == "plan_approved"]
+        if not visual_slots:
+            raise RuntimeError(
+                "No approved generated-visual scenes exist. Skip stages 8–10 when this reel intentionally remains talking-head only."
+            )
+
     if stage_number == 10:
-        from ..core.io import read_json
-
         plan_payload = read_json(paths.plan / "broll_plan.json", {"slots": []})
-        if not any(slot.get("status") == "still_approved" for slot in plan_payload.get("slots", [])):
-            raise RuntimeError("Approve at least one still before generating motion")
-    if stage_number == 12:
-        from ..core.io import read_json
+        visual_slots = [
+            slot for slot in plan_payload.get("slots", [])
+            if slot.get("status") not in {"rejected", "talking_head"}
+        ]
+        if visual_slots and not any(slot.get("status") == "still_approved" for slot in visual_slots):
+            raise RuntimeError("Approve at least one still before generating motion, or skip motion generation")
 
+    if stage_number == 13:
         plan_payload = read_json(paths.plan / "broll_plan.json", {"slots": []})
         unresolved = [
             slot.get("slot_id") for slot in plan_payload.get("slots", [])
@@ -112,5 +147,9 @@ def _check_gate(meta: dict[str, Any], stage_number: int) -> None:
         ]
         if unresolved:
             raise RuntimeError(
-                "Resolve every pending slot review before final rendering: " + ", ".join(str(item) for item in unresolved)
+                "Resolve every pending scene review before the complete edit preview: "
+                + ", ".join(str(item) for item in unresolved)
             )
+
+    if stage_number == 14 and not meta.get("approvals", {}).get("complete_preview"):
+        raise RuntimeError("Approve the complete edit preview before final rendering")
