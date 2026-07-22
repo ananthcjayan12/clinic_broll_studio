@@ -1,4 +1,4 @@
-Create the still-image prompt for this approved V2 scene:
+Create a concise still-image prompt for this approved visual scene:
 {slot}
 
 RUN-LEVEL VISUAL BIBLE
@@ -6,4 +6,4 @@ RUN-LEVEL VISUAL BIBLE
 
 Canvas: {width}x{height}, aspect ratio {aspect_ratio}.
 
-Explicitly describe subject, environment, camera/lens, composition, lighting, palette, real material texture, one visually interesting detail, and motion potential. Compose for the requested top/bottom, side split, picture-in-picture, full-B-roll, floating visual, or layered-foreground layout. Preserve useful negative space only where the layout needs it. Do not include written text, watermark, logo, UI, fake captions, or the real doctor's face inside generated media; all text and the original speaker video are rendered locally.
+Return one coherent generated image. Use this structure inside the prompt: VISUAL MEDIUM, SUBJECT, SETTING, COMPOSITION, LIGHT, MATERIAL/ANATOMY DETAIL, and AVOID. Keep the prompt under 180 words. Respect the requested visual_strategy and layout. The final image must feel like premium modern vertical B-roll: colourful editorial colour grade, bold single focal point, dimensional lighting, and strong phone-screen readability—not a pale empty field or a flat textbook vector. For dental diagrams, specify one clinically calm, proportional mechanism illustration—not a real patient, not a cross-section collage, and not an anatomy-heavy scene. For timing graphics, use a single elegant symbolic object or scene with no baked-in text. Never request readable text, logos, UI chrome, or the real doctor's face.

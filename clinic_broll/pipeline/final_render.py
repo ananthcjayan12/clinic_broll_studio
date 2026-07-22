@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -102,29 +101,28 @@ def _publish_final(candidate: Path, canonical: Path) -> Path | None:
 def _chunk_windows(duration: float, fps: int, slots: list[dict[str, Any]], max_seconds: float = 10.0) -> list[tuple[float, float]]:
     if duration <= 0 or fps <= 0 or max_seconds <= 0:
         raise ValueError("Duration, fps, and chunk size must be positive")
-    total_frames = math.ceil(duration * fps)
-    max_frames = max(1, round(max_seconds * fps))
     intervals = sorted((float(slot["start"]), float(slot["start"]) + float(slot["duration"])) for slot in slots)
-    frame_windows: list[tuple[int, int]] = []
-    start_frame = 0
-    while start_frame < total_frames:
-        end_frame = min(start_frame + max_frames, total_frames)
-        if end_frame < total_frames:
-            boundary = end_frame / fps
-            crossing = [(start, end) for start, end in intervals if start < boundary < end]
-            if crossing:
-                safe_before = min(math.floor(start * fps) for start, _ in crossing)
-                if safe_before <= start_frame:
-                    # A single long scene may exceed the preferred chunk size. Keep it
-                    # intact instead of failing; chunked Chromium memory remains bounded
-                    # by the scene's actual duration.
-                    safe_after = max(math.ceil(end * fps) for _, end in crossing)
-                    end_frame = min(safe_after, total_frames)
-                else:
-                    end_frame = safe_before
-        frame_windows.append((start_frame, end_frame))
-        start_frame = end_frame
-    return [(start / fps, duration if end == total_frames else end / fps) for start, end in frame_windows]
+    # Use the authored scene boundaries exactly.  Older plans can contain
+    # millisecond boundaries that are not frame-aligned; rounding them down
+    # creates a chunk boundary inside a scene and makes composition.build fail.
+    safe_boundaries = sorted({0.0, duration, *(value for interval in intervals for value in interval)})
+    windows: list[tuple[float, float]] = []
+    start = 0.0
+    while start < duration - 1e-6:
+        target = min(start + max_seconds, duration)
+        before = [point for point in safe_boundaries if start + 1e-6 < point <= target + 1e-6]
+        if before:
+            end = max(before)
+        else:
+            # A single scene exceeds the preferred chunk duration. Preserve its
+            # timing as one chunk rather than splitting it.
+            after = [point for point in safe_boundaries if point > start + 1e-6]
+            end = min(after) if after else duration
+        if end <= start + 1e-6:
+            raise RuntimeError("Could not find a safe final-render chunk boundary")
+        windows.append((round(start, 6), round(end, 6)))
+        start = end
+    return windows
 
 
 def _write_concat_manifest(manifest: Path, chunks: list[Path]) -> None:

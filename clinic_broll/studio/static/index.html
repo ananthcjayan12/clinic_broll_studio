@@ -3,29 +3,30 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Clinic B-roll Studio V2</title>
+  <title>Clinic Video Studio</title>
   <link rel="stylesheet" href="/static/styles.css" />
-  <link rel="stylesheet" href="/static/editorial-controls.css" />
-  <link rel="stylesheet" href="/static/dialogue-v2.css" />
-  <link rel="stylesheet" href="/static/v2-editor.css" />
+  <link rel="stylesheet" href="/static/simple-editor.css" />
 </head>
 <body>
   <div class="app-shell">
     <aside class="sidebar">
       <div class="brand-lockup">
-        <div class="brand-mark">V2</div>
-        <div><strong>Clinic B-roll</strong><span>AI Editing Studio</span></div>
+        <div class="brand-mark">CS</div>
+        <div><strong>Clinic Studio</strong><span>Simple video editor</span></div>
       </div>
       <button class="primary full" id="new-run-button">＋ New production</button>
       <div class="side-label">Productions</div>
       <div id="run-list" class="run-list"></div>
-      <div class="doctor-card" id="doctor-card">Checking providers…</div>
+      <div class="doctor-card" id="doctor-card">Checking system…</div>
     </aside>
 
     <main class="workspace">
       <header class="topbar">
-        <div><span class="eyebrow">EDITOR / DIRECTOR CONTROL ROOM</span><h1 id="page-title">Start a production</h1></div>
-        <div class="top-actions" id="top-actions"></div>
+        <div class="topbar-main">
+          <div><span class="eyebrow">CLINIC VIDEO STUDIO</span><h1 id="page-title">Start a production</h1></div>
+          <div class="top-actions" id="top-actions"></div>
+        </div>
+        <nav class="workflow-tabs" id="workflow-tabs"></nav>
       </header>
       <section id="content"></section>
     </main>
@@ -33,50 +34,21 @@
 
   <dialog id="create-dialog">
     <form id="create-form" class="dialog-form">
-      <div class="dialog-head"><div><span class="eyebrow">NEW V2 RUN</span><h2>Upload a talking-head video</h2></div><button type="button" class="icon-button" data-close>×</button></div>
-      <label>Permanent run ID<input name="run_id" required pattern="[a-z0-9][a-z0-9._-]{0,95}" placeholder="clinic-enamel-v02" /></label>
+      <div class="dialog-head"><div><span class="eyebrow">NEW PRODUCTION</span><h2>Upload the talking-head video</h2></div><button type="button" class="icon-button" data-close>×</button></div>
+      <label>Project name<input name="run_id" required pattern="[a-z0-9][a-z0-9._-]{0,95}" placeholder="brush-after-food" /></label>
       <label>Video file<input name="video" type="file" accept="video/mp4,video/quicktime,video/webm" required /></label>
-
       <div class="field-grid">
-        <label>Transcription<select name="asr_provider"><option value="elevenlabs">ElevenLabs Scribe v2</option></select></label>
-        <label>Dialogue cleanup<select name="dialogue_cleanup_mode"><option value="off">Off</option><option value="conservative">Conservative</option><option value="balanced" selected>Balanced</option><option value="tight">Tight Reel</option></select></label>
-        <label>Editing profile<select name="editing_profile"><option value="clean_medical">Clean Medical</option><option value="natural_colorful">Natural Colourful</option><option value="modern_tech_explainer" selected>Modern Tech Explainer</option><option value="high_energy_reel">High-Energy Reel</option><option value="minimal_professional">Minimal Professional</option></select></label>
-        <label>Editing intensity<select name="editing_intensity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
+        <label>Editing style<select name="editing_profile"><option value="clean_medical" selected>Clean Medical</option><option value="natural_colorful">Natural Colourful</option><option value="modern_tech_explainer">Modern Explainer</option><option value="minimal_professional">Minimal Professional</option></select></label>
+        <label>B-roll amount<select name="editing_intensity"><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
+        <label>Image options per photo<select name="image_candidates_per_slot"><option value="1" selected>1 — recommended</option><option value="2">2</option><option value="3">3</option></select></label>
+        <label>Sound effects<select name="sfx_density"><option value="off">Off</option><option value="low" selected>Low</option><option value="medium">Medium</option></select></label>
       </div>
-
-      <div class="field-grid">
-        <label>Visual style<select name="visual_generation_style"><option value="natural">Natural</option><option value="natural_colorful" selected>Natural + colourful</option><option value="cinematic">Cinematic</option><option value="medical_illustration">Medical illustration</option><option value="mixed">Mixed</option></select></label>
-        <label>Still candidates<select name="image_candidates_per_slot"><option value="1">1</option><option value="2" selected>2</option><option value="3">3</option></select></label>
-        <label>Foreground treatment<select name="foreground_treatment"><option value="auto" selected>Auto by edge risk</option><option value="never">Never use matte</option><option value="only_approved">Only approved scenes</option><option value="prefer_when_clean">Prefer when clean</option></select></label>
-        <label>Local SFX<select name="sfx_density"><option value="off">Off</option><option value="low">Low</option><option value="medium" selected>Medium</option><option value="high">High</option></select></label>
-      </div>
-
-      <div class="field-grid">
-        <label>Malayalam captions<select name="captions_mode"><option value="off" selected>Off by default</option><option value="auto">Only selected scenes</option><option value="all">Show throughout</option></select></label>
-        <label>Media generation<select name="media_provider"><option value="grok_cli">Grok CLI / SuperGrok</option></select></label>
-        <label>Matte engine<select name="matting_provider"><option value="mediapipe">Refined MediaPipe matte</option><option value="none">Disable matte</option></select></label>
-        <label>Output<select name="aspect_ratio"><option value="9:16">Vertical 9:16</option><option value="16:9">Horizontal 16:9</option></select></label>
-      </div>
-
-      <fieldset class="layout-picker">
-        <legend>Allowed composition modes</legend>
-        <label><input type="checkbox" name="preferred_layouts" value="talking_head" checked> Talking head</label>
-        <label><input type="checkbox" name="preferred_layouts" value="broll_top_speaker_bottom" checked> B-roll top</label>
-        <label><input type="checkbox" name="preferred_layouts" value="speaker_top_broll_bottom" checked> B-roll bottom</label>
-        <label><input type="checkbox" name="preferred_layouts" value="speaker_left_broll_right" checked> Side split</label>
-        <label><input type="checkbox" name="preferred_layouts" value="broll_left_speaker_right" checked> Reverse side split</label>
-        <label><input type="checkbox" name="preferred_layouts" value="picture_in_picture" checked> Picture-in-picture</label>
-        <label><input type="checkbox" name="preferred_layouts" value="floating_visual" checked> Floating visual</label>
-        <label><input type="checkbox" name="preferred_layouts" value="full_broll" checked> Full B-roll</label>
-        <label><input type="checkbox" name="preferred_layouts" value="layered_foreground" checked> Optional foreground</label>
-      </fieldset>
-
-      <button class="primary" type="submit">Create controlled V2 run</button>
-      <p class="muted">The upload remains immutable. Dialogue cuts, generated assets, choreography and sound cues stay reversible and require review gates.</p>
+      <details class="advanced"><summary>Advanced upload settings</summary><div class="field-grid" style="margin-top:12px"><label>Dialogue cleanup<select name="dialogue_cleanup_mode"><option value="conservative">Conservative</option><option value="balanced" selected>Balanced</option><option value="tight">Tight Reel</option><option value="off">Off</option></select></label><label>Matte engine<select name="matting_provider"><option value="mediapipe">Automatic</option><option value="none">Off</option></select></label><label>Output<select name="aspect_ratio"><option value="9:16">Vertical 9:16</option><option value="16:9">Horizontal 16:9</option></select></label></div></details>
+      <button class="primary" type="submit">Create production</button>
+      <p class="muted">The doctor stays visible for most of the reel. Every approved visual is generated by the configured image model and reviewed before use.</p>
     </form>
   </dialog>
   <div id="toast"></div>
-  <script src="/static/app.js"></script>
-  <script src="/static/dialogue-v2.js"></script>
+  <script src="/static/simple-app.js"></script>
 </body>
 </html>

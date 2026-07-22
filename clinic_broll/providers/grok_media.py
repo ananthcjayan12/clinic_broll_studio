@@ -187,6 +187,13 @@ def generate_with_grok_cli(*, prompt: str, destination: Path, media_type: str, c
         return _record(destination, "grok_cli", media_type, prompt, reference, str(newest))
 
     transcript = _streaming_text(combined)
+    http_failure = re.search(r"HTTP\s+(\d{3})\s+([^\n`]+)", transcript, flags=re.I)
+    if http_failure:
+        raise RuntimeError(
+            "Grok Imagine image generation failed upstream with HTTP "
+            f"{http_failure.group(1)} {http_failure.group(2).strip()}. "
+            "No image was created; retry the visual when the provider is available."
+        )
     if "ZDR" in transcript and "upload_url" in transcript:
         if _zdr_s3_configured():
             raise RuntimeError(
@@ -218,7 +225,7 @@ def generate_with_xai_api(*, prompt: str, destination: Path, media_type: str, re
         response = requests.post(
             "https://api.x.ai/v1/images/generations",
             headers={**headers, "Content-Type": "application/json"},
-            json={"model": os.getenv("CBS_XAI_IMAGE_MODEL", "grok-imagine-image"), "prompt": prompt, "aspect_ratio": aspect_ratio},
+            json={"model": os.getenv("CBS_XAI_IMAGE_MODEL", "grok-imagine-image-quality"), "prompt": prompt, "aspect_ratio": aspect_ratio},
             timeout=300,
         )
         if response.status_code >= 400:

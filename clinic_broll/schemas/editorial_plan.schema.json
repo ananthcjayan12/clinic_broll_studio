@@ -6,6 +6,7 @@
     "summary": {"type": "string"},
     "scenes": {
       "type": "array",
+      "maxItems": 16,
       "items": {
         "type": "object",
         "required": ["start", "end", "narration", "editorial_purpose", "composition_mode", "layout_variant", "subject_mode", "visual_style", "camera_move", "transition_in", "transition_out", "caption_mode", "sound_intent"],
@@ -20,7 +21,8 @@
           "composition_mode": {"enum": ["talking_head", "split_layout", "full_broll", "layered_foreground", "picture_in_picture", "graphic_scene", "comparison", "montage"]},
           "layout_variant": {"enum": ["talking_head", "broll_top_speaker_bottom", "speaker_top_broll_bottom", "speaker_left_broll_right", "broll_left_speaker_right", "picture_in_picture", "floating_visual", "full_broll", "layered_foreground"]},
           "subject_mode": {"enum": ["original", "cropped_original", "matte_foreground", "picture_in_picture", "hidden"]},
-          "visual_style": {"enum": ["natural_lifestyle", "colorful_macro", "clean_medical_illustration", "clinic_authentic", "playful_explainer", "mixed"]},
+          "visual_style": {"enum": ["natural", "natural_colorful", "cinematic", "medical_illustration", "natural_lifestyle", "colorful_macro", "clean_medical_illustration", "clinic_authentic", "playful_explainer", "mixed"]},
+          "visual_strategy": {"enum": ["none", "generated_photo", "dental_diagram", "editorial_graphic"]},
           "visual_brief": {"type": "string"},
           "motion_brief": {"type": "string"},
           "text_overlay": {"type": "string"},

@@ -1,9 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["selected_path", "scores", "reason"],
+  "required": ["decision", "selected_path", "scores", "reason"],
   "properties": {
-    "selected_path": {"type": "string"},
+    "decision": {"enum": ["approve", "manual_medical_review", "reject_all"]},
+    "selected_path": {"type": ["string", "null"]},
     "scores": {
       "type": "array",
       "items": {
