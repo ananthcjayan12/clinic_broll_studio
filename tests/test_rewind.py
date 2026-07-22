@@ -26,10 +26,12 @@ def test_rewind_preserves_upload_and_clears_stale_still_versions(tmp_path, monke
             "review": {"plan": "approve_plan", "still": "approve_still", "motion": None},
         }]
     })
-    for number in range(1, 8):
+    for number in range(1, 10):
         mark_stage("demo-v01", number, "complete")
 
-    rewind_run("demo-v01", 6)
+    # Stage 8 is still generation in the dialogue-cleanup pipeline. Rewinding
+    # from stage 6 would intentionally rewind the B-roll plan itself.
+    rewind_run("demo-v01", 8)
 
     assert (root / "source" / "upload.mov").exists()
     plan = read_json(root / "plan" / "broll_plan.json")
