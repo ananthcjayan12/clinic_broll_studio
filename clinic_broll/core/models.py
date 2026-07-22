@@ -34,12 +34,17 @@ PROVIDER_CATALOG: dict[str, dict[str, Any]] = {
 
 TASK_CATALOG: dict[str, dict[str, Any]] = {
     "dialogue_editor": {"label": "Dialogue cleanup and continuity", "stage": 3},
-    "broll_analysis": {"label": "B-roll opportunity analysis", "stage": 6},
-    "slot_refinement": {"label": "Slot refinement", "stage": 6},
-    "image_prompt": {"label": "Still-image visual direction", "stage": 8},
-    "motion_prompt": {"label": "Image-to-video motion direction", "stage": 10},
-    "semantic_qa": {"label": "Semantic and clinical QA", "stage": 13},
-    "repair_advisor": {"label": "Targeted repair advisor", "stage": 13},
+    "editorial_director": {"label": "Editorial director and scene graph", "stage": 6},
+    "visual_bible_director": {"label": "Visual continuity bible", "stage": 6},
+    "slot_refinement": {"label": "Scene refinement", "stage": 6},
+    "image_prompt": {"label": "Natural and colourful visual direction", "stage": 9},
+    "visual_candidate_reviewer": {"label": "Visual candidate reviewer", "stage": 9},
+    "motion_prompt": {"label": "Image-to-video motion direction", "stage": 11},
+    "edit_choreographer": {"label": "Edit choreography and camera moves", "stage": 12},
+    "sound_director": {"label": "Sound-effects director", "stage": 13},
+    "final_edit_reviewer": {"label": "Final visual, edit, and audio review", "stage": 16},
+    "semantic_qa": {"label": "Semantic and clinical QA", "stage": 16},
+    "repair_advisor": {"label": "Targeted repair advisor", "stage": 16},
 }
 
 DEFAULT_MODEL_MAP: dict[str, dict[str, str]] = {
