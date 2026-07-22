@@ -8,6 +8,7 @@ from ..core.paths import run_paths
 from ..core.state import append_log, load_run
 from ..providers.registry import call_task_json
 from .common import load_prompt, load_schema
+from .editorial_policy import apply_editorial_policy, repair_editorial_payload, visual_strategy_for
 
 COMPOSITION_MODES = {
     "talking_head", "split_layout", "full_broll", "layered_foreground",
@@ -22,6 +23,12 @@ SUBJECT_MODES = {"original", "cropped_original", "matte_foreground", "picture_in
 VISUAL_STYLES = {
     "natural_lifestyle", "colorful_macro", "clean_medical_illustration",
     "clinic_authentic", "playful_explainer", "mixed",
+}
+STYLE_ALIASES = {
+    "natural": "natural_lifestyle",
+    "natural_colorful": "mixed",
+    "cinematic": "natural_lifestyle",
+    "medical_illustration": "clean_medical_illustration",
 }
 CAMERA_MOVES = {"static", "subtle_punch_in", "emphasis_punch", "slow_push", "micro_pull_back", "face_follow", "object_follow"}
 TRANSITIONS = {"direct_cut", "soft_crossfade", "clean_push", "vertical_slide", "horizontal_swipe", "mask_reveal", "paper_reveal", "zoom_match", "blur_transition", "dip_to_white"}
@@ -63,6 +70,7 @@ def run(run_id: str) -> dict[str, Any]:
     prompt_dir.mkdir(parents=True, exist_ok=True)
     response_dir.mkdir(parents=True, exist_ok=True)
     (prompt_dir / "editorial-director.txt").write_text(f"SYSTEM\n{system}\n\nUSER\n{user}", encoding="utf-8")
+    fallback_used = False
     try:
         append_log(paths, f"Editorial Director: requesting scene graph from {director_selection['provider']}")
         raw = call_task_json(
@@ -73,15 +81,22 @@ def run(run_id: str) -> dict[str, Any]:
             cwd=paths.root,
             output_schema=load_schema("editorial_plan.schema.json"),
         )
+        raw = repair_editorial_payload(raw)
         write_json(response_dir / "editorial-director.json", raw)
     except Exception as exc:
+        # A provider/schema failure must never trigger a large paid B-roll plan.
+        # The safe fallback preserves the complete talking head and asks the
+        # operator to rerun/refine the Director instead.
+        fallback_used = True
         raw = _fallback_editorial(transcript, visual, settings)
         write_json(response_dir / "editorial-director-fallback.json", {"error": str(exc), "payload": raw})
-        append_log(paths, f"Editorial Director: deterministic fallback used ({exc})")
+        append_log(paths, f"Editorial Director: safe talking-head fallback used ({exc})")
 
     duration = float(transcript.get("duration_seconds") or 0)
     fps = int(meta["settings"].get("fps") or 30)
-    editorial_plan = normalize_editorial_plan(raw, duration, fps=fps)
+    normalized = normalize_editorial_plan(raw, duration, fps=fps)
+    editorial_plan = apply_editorial_policy(normalized, meta["settings"])
+    editorial_plan["fallback_used"] = fallback_used
     write_json(paths.editorial / "editorial-plan.json", editorial_plan)
 
     bible_selection = meta["settings"]["task_models"]["visual_bible_director"]
@@ -108,18 +123,31 @@ def run(run_id: str) -> dict[str, Any]:
 
     broll_plan = editorial_to_broll_plan(editorial_plan, visual_bible)
     write_json(paths.plan / "broll_plan.json", broll_plan)
-    generated_count = sum(1 for scene in editorial_plan["scenes"] if scene["composition_mode"] != "talking_head")
-    append_log(paths, f"Editorial Director: saved {len(editorial_plan['scenes'])} scenes and {generated_count} visual opportunities")
+    report = editorial_plan.get("budget_report") or {}
+    append_log(
+        paths,
+        "Editorial Director: saved "
+        f"{report.get('editorial_scenes', len(editorial_plan['scenes']))} operator scenes, "
+        f"{report.get('visual_scenes', 0)} visual moments, "
+        f"{report.get('expected_image_generations', 0)} expected image requests, "
+        f"{round(float(report.get('visual_coverage_ratio', 0)) * 100, 1)}% visual coverage",
+    )
     return {
         "artifacts": [
             "editorial/editorial-plan.json", "editorial/visual-bible.json",
             "plan/broll_plan.json", "prompts/editorial/", "responses/editorial/",
         ],
-        "summary": {"scenes": len(editorial_plan["scenes"]), "visual_scenes": generated_count},
+        "summary": {
+            "scenes": len(editorial_plan["scenes"]),
+            "visual_scenes": report.get("visual_scenes", 0),
+            "expected_image_generations": report.get("expected_image_generations", 0),
+            "fallback_used": fallback_used,
+        },
     }
 
 
 def normalize_editorial_plan(payload: dict[str, Any], duration: float, *, fps: int = 30) -> dict[str, Any]:
+    payload = repair_editorial_payload(payload)
     scenes: list[dict[str, Any]] = []
     previous_end = 0.0
     for raw in sorted(payload.get("scenes") or [], key=lambda item: float(item.get("start") or 0)):
@@ -145,6 +173,7 @@ def normalize_editorial_plan(payload: dict[str, Any], duration: float, *, fps: i
         if layout == "picture_in_picture":
             composition, subject = "picture_in_picture", "picture_in_picture"
         style = str(raw.get("visual_style") or "natural_lifestyle")
+        style = STYLE_ALIASES.get(style, style)
         if style not in VISUAL_STYLES:
             style = "natural_lifestyle"
         camera = str(raw.get("camera_move") or "static")
@@ -187,12 +216,14 @@ def normalize_editorial_plan(payload: dict[str, Any], duration: float, *, fps: i
             "sound_intent": [str(item) for item in (raw.get("sound_intent") or [])][:4],
             "priority": str(raw.get("priority") or "useful") if str(raw.get("priority") or "useful") in {"essential", "useful", "optional"} else "useful",
             "safety": list(raw.get("safety") or ["Preserve clinical meaning", "No text inside generated image", "No distorted teeth or anatomy"]),
+            "operator_visible": bool(raw.get("operator_visible", True)),
         }
+        scene["visual_strategy"] = visual_strategy_for(scene)
         scenes.append(scene)
         previous_end = end
     return {
-        "version": "2.0",
-        "summary": str(payload.get("summary") or "V2 editorial scene graph"),
+        "version": "2.1",
+        "summary": str(payload.get("summary") or "V2.1 editorial scene graph"),
         "fps": fps,
         "duration_seconds": duration,
         "scenes": scenes,
@@ -203,7 +234,8 @@ def editorial_to_broll_plan(editorial_plan: dict[str, Any], visual_bible: dict[s
     slots: list[dict[str, Any]] = []
     for scene in editorial_plan.get("scenes", []):
         layout = scene["layout_variant"]
-        talking_head = scene["composition_mode"] == "talking_head"
+        strategy = str(scene.get("visual_strategy") or visual_strategy_for(scene))
+        talking_head = scene["composition_mode"] == "talking_head" or strategy == "none"
         slot_id = f"broll_{len(slots)+1:03d}"
         slots.append({
             "slot_id": slot_id,
@@ -222,6 +254,9 @@ def editorial_to_broll_plan(editorial_plan: dict[str, Any], visual_bible: dict[s
             "layout_template": LAYOUT_COMPATIBILITY[layout],
             "visual_type": scene["visual_style"],
             "visual_style": scene["visual_style"],
+            "visual_strategy": strategy,
+            "provider_usage": strategy == "generated_photo",
+            "operator_visible": bool(scene.get("operator_visible", True)),
             "keep_subject_foreground": scene["subject_mode"] == "matte_foreground",
             "panel_region": _panel_region(layout),
             "show_caption": scene["caption_mode"] == "on",
@@ -244,11 +279,13 @@ def editorial_to_broll_plan(editorial_plan: dict[str, Any], visual_bible: dict[s
             "review": {"plan": "keep_talking_head" if talking_head else None, "still": None, "motion": None},
         })
     return {
-        "version": "2.0",
+        "version": "2.1",
         "summary": editorial_plan.get("summary"),
         "fps": editorial_plan.get("fps", 30),
         "duration_seconds": editorial_plan.get("duration_seconds", 0),
         "visual_bible": visual_bible,
+        "budget_report": editorial_plan.get("budget_report", {}),
+        "fallback_used": bool(editorial_plan.get("fallback_used", False)),
         "slots": slots,
     }
 
@@ -276,59 +313,50 @@ def _panel_region(layout: str) -> float:
 
 
 def _fallback_editorial(transcript: dict[str, Any], visual: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
-    phrases = transcript.get("phrases") or []
-    scenes: list[dict[str, Any]] = []
-    for index, phrase in enumerate(phrases):
-        start = float(phrase.get("start") or 0)
-        end = float(phrase.get("end") or start + 2.5)
-        text = str(phrase.get("text") or "")
-        first_or_last = index == 0 or index == len(phrases) - 1
-        dense = len(text.split()) >= 8
-        if first_or_last:
-            mode, layout, subject = "talking_head", "talking_head", "original"
-        elif dense:
-            mode, layout, subject = "split_layout", "broll_top_speaker_bottom", "cropped_original"
-        else:
-            mode, layout, subject = "picture_in_picture", "picture_in_picture", "picture_in_picture"
-        scenes.append({
-            "start": start,
-            "end": end,
-            "narration": text,
-            "editorial_purpose": "Explain the current narration visually",
-            "energy": 0.7 if index == 0 else 0.5,
-            "concept_density": 0.75 if dense else 0.45,
-            "keep_eye_contact": first_or_last,
-            "composition_mode": mode,
-            "layout_variant": layout,
-            "subject_mode": subject,
-            "visual_style": "colorful_macro" if any(token in text.lower() for token in ("brush", "tooth", "enamel", "gum")) else "natural_lifestyle",
-            "visual_brief": text,
-            "motion_brief": "Subtle stable movement with realistic depth",
-            "camera_move": "subtle_punch_in" if first_or_last else "static",
+    duration = float(transcript.get("duration_seconds") or 0)
+    narration = " ".join(str(item.get("text") or "").strip() for item in transcript.get("phrases") or []).strip()
+    return {
+        "summary": "Safe talking-head fallback; rerun the Editorial Director before generating visual media",
+        "scenes": [{
+            "start": 0.0,
+            "end": duration,
+            "narration": narration,
+            "editorial_purpose": "Preserve the complete cleaned talking-head delivery",
+            "energy": 0.45,
+            "concept_density": 0.4,
+            "keep_eye_contact": True,
+            "composition_mode": "talking_head",
+            "layout_variant": "talking_head",
+            "subject_mode": "original",
+            "visual_style": "natural_lifestyle",
+            "visual_strategy": "none",
+            "visual_brief": "",
+            "motion_brief": "",
+            "camera_move": "static",
             "transition_in": "direct_cut",
             "transition_out": "direct_cut",
             "emphasis_preset": "none",
             "caption_mode": "off",
             "sound_intent": [],
-            "priority": "essential" if dense else "useful",
-            "safety": ["Preserve clinical meaning", "No written text in generated media"],
-        })
-    return {"summary": "Deterministic modern explainer edit", "scenes": scenes}
+            "priority": "essential",
+            "safety": ["Preserve clinical meaning", "Do not start paid media generation from fallback"],
+        }],
+    }
 
 
 def _fallback_visual_bible(settings: dict[str, Any]) -> dict[str, Any]:
     return {
-        "look": "natural colourful modern dental explainer",
-        "contrast": "medium-high with protected skin tones",
-        "saturation": "vibrant but realistic",
-        "lighting": "soft directional daylight with restrained fill",
-        "depth": "shallow for macro and lifestyle photography; clear layers for illustration",
-        "palette": ["warm cream", "fresh mint", "coral", "natural enamel white", "restrained teal"],
-        "backgrounds": ["modern bathroom daylight", "authentic clinic white", "warm neutral home", "soft mint studio"],
-        "camera_language": ["85mm macro", "natural 35mm lifestyle", "three-quarter angle", "diagonal composition"],
-        "texture_language": ["real bristles", "natural moisture", "tactile ceramic", "believable dental materials"],
-        "avoid": ["sterile blue 3D render", "waxy anatomy", "generic stock smile", "fake text", "identical centred composition", "excessive teal glow"],
-        "medical_rules": ["natural tooth proportions", "no gore", "no impossible anatomy", "no diagnosis claims not present in narration"],
+        "look": "clean restrained dental education with natural lifestyle inserts",
+        "contrast": "medium with protected skin tones",
+        "saturation": "natural; stronger colour only in simple editorial graphics",
+        "lighting": "soft natural daylight for photography; flat clean lighting for diagrams",
+        "depth": "realistic photographic depth for lifestyle scenes; clear flat layers for diagrams",
+        "palette": ["warm cream", "clinic white", "restrained teal", "coral warning accent"],
+        "backgrounds": ["authentic clinic", "warm neutral home", "clean off-white diagram field"],
+        "camera_language": ["natural 35mm lifestyle", "stable macro only when physically credible", "simple asymmetric composition"],
+        "texture_language": ["real food texture", "real brush materials", "clean vector dental layers"],
+        "avoid": ["waxy anatomy", "floating teeth", "literal melting enamel", "collage seams", "fake text", "generic stock smile", "excessive teal glow"],
+        "medical_rules": ["use deterministic diagrams for anatomy and mechanisms", "no impossible brush geometry", "no diagnosis claims not present in narration"],
     }
 
 
@@ -336,6 +364,8 @@ def _compact_settings(settings: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "aspect_ratio", "editing_profile", "editing_intensity", "visual_generation_style",
         "foreground_treatment", "sfx_density", "preferred_layouts", "captions_mode",
+        "image_candidates_per_slot", "max_visual_scenes", "max_broll_coverage",
+        "max_initial_generations", "max_motion_scenes",
     )
     return {key: settings.get(key) for key in keys}
 
