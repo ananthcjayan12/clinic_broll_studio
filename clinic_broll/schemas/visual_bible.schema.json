@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["look", "contrast", "saturation", "lighting", "depth", "palette", "backgrounds", "avoid"],
+  "properties": {
+    "look": {"type": "string"},
+    "contrast": {"type": "string"},
+    "saturation": {"type": "string"},
+    "lighting": {"type": "string"},
+    "depth": {"type": "string"},
+    "palette": {"type": "array", "items": {"type": "string"}, "minItems": 3},
+    "backgrounds": {"type": "array", "items": {"type": "string"}},
+    "camera_language": {"type": "array", "items": {"type": "string"}},
+    "texture_language": {"type": "array", "items": {"type": "string"}},
+    "avoid": {"type": "array", "items": {"type": "string"}},
+    "medical_rules": {"type": "array", "items": {"type": "string"}}
+  }
+}
