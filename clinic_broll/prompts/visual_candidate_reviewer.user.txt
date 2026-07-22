@@ -1,0 +1,12 @@
+Review these candidates for one editorial scene.
+
+SCENE
+{scene}
+
+VISUAL BIBLE
+{visual_bible}
+
+CANDIDATES
+{candidates}
+
+The candidate paths are local and may be inspected by a capable CLI model. Choose the strongest candidate. Flag human review when anatomy, teeth, text artifacts, or artificial appearance could create publishing risk.

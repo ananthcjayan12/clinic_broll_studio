@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["selected_path", "scores", "reason"],
+  "properties": {
+    "selected_path": {"type": "string"},
+    "scores": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "naturalness", "colour_quality", "visual_interest", "composition_fit", "medical_accuracy", "motion_potential", "artificial_appearance"],
+        "properties": {
+          "path": {"type": "string"},
+          "naturalness": {"type": "number", "minimum": 0, "maximum": 100},
+          "colour_quality": {"type": "number", "minimum": 0, "maximum": 100},
+          "visual_interest": {"type": "number", "minimum": 0, "maximum": 100},
+          "composition_fit": {"type": "number", "minimum": 0, "maximum": 100},
+          "medical_accuracy": {"type": "number", "minimum": 0, "maximum": 100},
+          "motion_potential": {"type": "number", "minimum": 0, "maximum": 100},
+          "artificial_appearance": {"type": "number", "minimum": 0, "maximum": 100}
+        }
+      }
+    },
+    "reason": {"type": "string"},
+    "requires_human_review": {"type": "boolean"}
+  }
+}

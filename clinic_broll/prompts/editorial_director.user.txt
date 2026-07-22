@@ -1,0 +1,25 @@
+Create a complete editorial scene graph for this production.
+
+RUN SETTINGS
+{settings}
+
+CLEAN TRANSCRIPT
+{transcript}
+
+VISUAL / FACE / GESTURE ANALYSIS
+{visual_analysis}
+
+DIALOGUE CONTINUITY CUTS
+{continuity}
+
+Rules:
+- Cover the whole clean timeline with non-overlapping scenes, but create generated visual slots only where they add value.
+- Use talking_head for emotionally important, trust-building, recommendation, and CTA moments.
+- Use split_layout for modern top/bottom or side-by-side explanation without matting.
+- Use full_broll for complex visual explanations and to bridge hard dialogue cuts.
+- Use layered_foreground only when the local matte is likely clean and overlap adds depth.
+- Use picture_in_picture when full B-roll is useful but eye contact should remain.
+- Natural colourful visuals are preferred over sterile blue 3D renders.
+- Do not place transitions or sound effects on every cut.
+- Captions are off unless they add specific editorial value.
+- Keep timings inside the transcript duration.

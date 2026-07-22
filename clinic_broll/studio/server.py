@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -17,12 +17,22 @@ from ..core.config import FFMPEG, FFPROBE, HYPERFRAMES, PYTHON, RUNS_ROOT, STATI
 from ..core.io import read_json, write_json
 from ..core.models import PROVIDER_CATALOG, TASK_CATALOG, validate_model_map
 from ..core.paths import require_run_id, run_paths
-from ..core.state import STAGE_BY_NUMBER, create_run, list_runs, load_run, public_run_detail, rewind_run, save_run
+from ..core.state import (
+    STAGE_BY_NUMBER,
+    create_run,
+    list_runs,
+    load_run,
+    mark_stage,
+    public_run_detail,
+    rewind_run,
+    save_run,
+    stage_record,
+)
 from ..pipeline.plan import slot_action, update_slot
 from ..providers.registry import availability
 
 RUNS_ROOT.mkdir(parents=True, exist_ok=True)
-app = FastAPI(title="Clinic B-roll Studio", version="0.1.0")
+app = FastAPI(title="Clinic B-roll Studio V2", version="2.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_ROOT), name="static")
 app.mount("/runs", StaticFiles(directory=RUNS_ROOT), name="runs")
 
@@ -54,6 +64,10 @@ class ModelMapRequest(BaseModel):
     task_models: dict[str, dict[str, str]]
 
 
+class SettingsRequest(BaseModel):
+    settings: dict[str, Any]
+
+
 class SlotUpdateRequest(BaseModel):
     updates: dict[str, Any]
 
@@ -75,6 +89,10 @@ class RefineSlotRequest(BaseModel):
     instruction: str = ""
 
 
+class SoundCueUpdateRequest(BaseModel):
+    updates: dict[str, Any]
+
+
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
     return (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
@@ -87,7 +105,22 @@ def health() -> dict[str, Any]:
 
 @app.get("/api/catalog")
 def catalog() -> dict[str, Any]:
-    return {"providers": PROVIDER_CATALOG, "tasks": TASK_CATALOG}
+    return {
+        "providers": PROVIDER_CATALOG,
+        "tasks": TASK_CATALOG,
+        "v2": {
+            "editing_profiles": ["clean_medical", "natural_colorful", "modern_tech_explainer", "high_energy_reel", "minimal_professional", "custom"],
+            "editing_intensities": ["low", "medium", "high"],
+            "visual_styles": ["natural", "natural_colorful", "cinematic", "medical_illustration", "mixed"],
+            "foreground_treatments": ["auto", "never", "only_approved", "prefer_when_clean"],
+            "sfx_densities": ["off", "low", "medium", "high"],
+            "layout_variants": [
+                "talking_head", "broll_top_speaker_bottom", "speaker_top_broll_bottom",
+                "speaker_left_broll_right", "broll_left_speaker_right", "picture_in_picture",
+                "floating_visual", "full_broll", "layered_foreground",
+            ],
+        },
+    }
 
 
 @app.get("/api/runs")
@@ -182,17 +215,18 @@ def stop(run_id: str) -> dict[str, Any]:
         return {"stopped": True}
 
 
-
-
 @app.post("/api/runs/{run_id}/skip")
 def skip_stage(run_id: str, request: SkipRequest) -> dict[str, Any]:
     _require_idle(run_id)
-    if request.step not in {5, 8, 9}:
-        raise HTTPException(status_code=400, detail="Only optional matte, motion-generation, and motion-preview stages may be skipped")
-    from ..core.state import mark_stage, stage_record
+    allowed = {8, 9, 10, 12}
+    if request.step not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail="Only visual generation, visual preview, motion generation, and sound design may be skipped",
+        )
     meta = load_run(run_id)
     if request.step > 1 and stage_record(meta, request.step - 1)["status"] not in {"complete", "skipped"}:
-        raise HTTPException(status_code=400, detail="Complete the previous stage first")
+        raise HTTPException(status_code=400, detail="Complete or skip the previous stage first")
     mark_stage(run_id, request.step, "skipped", summary={"reason": "Skipped by operator"})
     return public_run_detail(run_id)
 
@@ -219,6 +253,25 @@ def models(run_id: str, request: ModelMapRequest) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.put("/api/runs/{run_id}/settings")
+def update_settings(run_id: str, request: SettingsRequest) -> dict[str, Any]:
+    _require_idle(run_id)
+    try:
+        meta = load_run(run_id)
+        allowed = {
+            "captions_mode", "editing_profile", "editing_intensity", "visual_generation_style",
+            "foreground_treatment", "sfx_density", "preferred_layouts", "image_candidates_per_slot",
+        }
+        for key, value in request.settings.items():
+            if key in allowed:
+                meta["settings"][key] = value
+        meta["settings"].update(_validate_v2_controls(meta["settings"]))
+        save_run(meta)
+        return public_run_detail(run_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.put("/api/runs/{run_id}/slots/{slot_id}")
 def edit_slot(run_id: str, slot_id: str, request: SlotUpdateRequest) -> dict[str, Any]:
     _require_idle(run_id)
@@ -239,7 +292,7 @@ def act_slot(run_id: str, slot_id: str, request: SlotActionRequest) -> dict[str,
 
 @app.post("/api/runs/{run_id}/slots/{slot_id}/refine")
 def refine_slot_endpoint(run_id: str, slot_id: str, request: RefineSlotRequest) -> dict[str, Any]:
-    _require_paid_confirmation([4], request.confirm_paid)
+    _require_paid_confirmation([6], request.confirm_paid)
     _launch(run_id, [
         "--slot-refine", slot_id, "--confirm-paid",
         "--instruction", request.instruction[:2000],
@@ -249,14 +302,14 @@ def refine_slot_endpoint(run_id: str, slot_id: str, request: RefineSlotRequest) 
 
 @app.post("/api/runs/{run_id}/slots/{slot_id}/regenerate-still")
 def regenerate_still(run_id: str, slot_id: str, request: PaidActionRequest) -> dict[str, Any]:
-    _require_paid_confirmation([6], request.confirm_paid)
+    _require_paid_confirmation([8], request.confirm_paid)
     _launch(run_id, ["--slot-still", slot_id, "--force", "--confirm-paid"])
     return {"started": True, "slot_id": slot_id, "kind": "still"}
 
 
 @app.post("/api/runs/{run_id}/slots/{slot_id}/regenerate-motion")
 def regenerate_motion(run_id: str, slot_id: str, request: PaidActionRequest) -> dict[str, Any]:
-    _require_paid_confirmation([8], request.confirm_paid)
+    _require_paid_confirmation([10], request.confirm_paid)
     _launch(run_id, ["--slot-motion", slot_id, "--force", "--confirm-paid"])
     return {"started": True, "slot_id": slot_id, "kind": "motion"}
 
@@ -265,16 +318,57 @@ def regenerate_motion(run_id: str, slot_id: str, request: PaidActionRequest) -> 
 def approve_all(run_id: str, request: ApproveAllRequest) -> dict[str, Any]:
     _require_idle(run_id)
     paths = run_paths(run_id)
-    plan = read_json(paths.plan / "broll_plan.json", {"slots": []})
     try:
-        for slot in plan.get("slots", []):
-            if request.level == "plan" and slot["status"] == "suggested":
-                slot_action(run_id, slot["slot_id"], "approve_plan")
-            elif request.level == "still" and slot["status"] == "still_review":
-                slot_action(run_id, slot["slot_id"], "approve_still")
-            elif request.level == "motion" and slot["status"] == "motion_review":
-                slot_action(run_id, slot["slot_id"], "approve_motion")
+        meta = load_run(run_id)
+        plan = read_json(paths.plan / "broll_plan.json", {"slots": []})
+        if request.level in {"editorial", "plan"}:
+            for slot in plan.get("slots", []):
+                if slot.get("status") == "suggested":
+                    slot_action(run_id, slot["slot_id"], "approve_plan")
+            meta = load_run(run_id)
+            meta["approvals"]["editorial"] = True
+            save_run(meta)
+        elif request.level == "still":
+            for slot in plan.get("slots", []):
+                if slot.get("status") == "still_review":
+                    slot_action(run_id, slot["slot_id"], "approve_still")
+            meta = load_run(run_id)
+            meta["approvals"]["stills"] = True
+            save_run(meta)
+        elif request.level == "motion":
+            for slot in plan.get("slots", []):
+                if slot.get("status") == "motion_review":
+                    slot_action(run_id, slot["slot_id"], "approve_motion")
+        elif request.level == "complete_preview":
+            meta["approvals"]["complete_preview"] = True
+            save_run(meta)
+        elif request.level == "final":
+            meta["approvals"]["final"] = True
+            save_run(meta)
+        else:
+            raise ValueError("Unknown approval level")
         return public_run_detail(run_id)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.put("/api/runs/{run_id}/sound/{cue_id}")
+def edit_sound_cue(run_id: str, cue_id: str, request: SoundCueUpdateRequest) -> dict[str, Any]:
+    _require_idle(run_id)
+    try:
+        paths = run_paths(run_id)
+        plan = read_json(paths.sound / "sound-plan.json", {"cues": []})
+        cue = next((item for item in plan.get("cues", []) if item.get("cue_id") == cue_id), None)
+        if not cue:
+            raise KeyError(cue_id)
+        for key in ("time", "gain_db", "enabled", "reason"):
+            if key in request.updates:
+                cue[key] = request.updates[key]
+        cue["time"] = max(0.0, float(cue.get("time", 0)))
+        cue["gain_db"] = max(-40.0, min(float(cue.get("gain_db", -18)), -3.0))
+        cue["enabled"] = bool(cue.get("enabled", True))
+        write_json(paths.sound / "sound-plan.json", plan)
+        return cue
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -289,7 +383,6 @@ def delete_run(run_id: str) -> dict[str, Any]:
     return {"deleted": True}
 
 
-
 def _validate_create_settings(payload: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise ValueError("Settings must be a JSON object")
@@ -297,8 +390,8 @@ def _validate_create_settings(payload: dict[str, Any]) -> dict[str, Any]:
     asr = str(payload.get("asr_provider") or "elevenlabs")
     matte = str(payload.get("matting_provider") or "mediapipe")
     aspect = str(payload.get("aspect_ratio") or "9:16")
-    candidates = int(payload.get("image_candidates_per_slot") or 1)
-    if media not in {"grok_cli"}:
+    candidates = int(payload.get("image_candidates_per_slot") or 2)
+    if media != "grok_cli":
         raise ValueError("Unsupported media provider")
     if asr != "elevenlabs":
         raise ValueError("Unsupported transcription provider; ElevenLabs Scribe v2 is required")
@@ -306,18 +399,73 @@ def _validate_create_settings(payload: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Unsupported matting provider")
     if aspect not in {"9:16", "16:9"}:
         raise ValueError("Unsupported aspect ratio")
-    if candidates not in {1, 2}:
-        raise ValueError("Still candidates per slot must be 1 or 2")
+    if candidates not in {1, 2, 3}:
+        raise ValueError("Still candidates per scene must be 1, 2, or 3")
     expected = (1080, 1920) if aspect == "9:16" else (1920, 1080)
-    width, height = int(payload.get("width") or expected[0]), int(payload.get("height") or expected[1])
+    width = int(payload.get("width") or expected[0])
+    height = int(payload.get("height") or expected[1])
     if (width, height) != expected:
         raise ValueError(f"{aspect} output must use {expected[0]}x{expected[1]}")
     payload.update({
-        "asr_provider": asr, "media_provider": media, "matting_provider": matte, "aspect_ratio": aspect,
-        "image_candidates_per_slot": candidates, "width": width, "height": height,
+        "asr_provider": asr,
+        "media_provider": media,
+        "matting_provider": matte,
+        "aspect_ratio": aspect,
+        "image_candidates_per_slot": candidates,
+        "width": width,
+        "height": height,
         "fps": 30,
     })
+    payload.update(_validate_v2_controls(payload))
     return payload
+
+
+def _validate_v2_controls(payload: dict[str, Any]) -> dict[str, Any]:
+    profile = str(payload.get("editing_profile") or "modern_tech_explainer")
+    intensity = str(payload.get("editing_intensity") or "medium")
+    visual_style = str(payload.get("visual_generation_style") or "natural_colorful")
+    foreground = str(payload.get("foreground_treatment") or "auto")
+    sfx = str(payload.get("sfx_density") or "medium")
+    captions = str(payload.get("captions_mode") or "off")
+    cleanup = str(payload.get("dialogue_cleanup_mode") or "balanced")
+    allowed_profiles = {"clean_medical", "natural_colorful", "modern_tech_explainer", "high_energy_reel", "minimal_professional", "custom"}
+    if profile not in allowed_profiles:
+        raise ValueError("Unsupported editing profile")
+    if intensity not in {"low", "medium", "high"}:
+        raise ValueError("Unsupported editing intensity")
+    if visual_style not in {"natural", "natural_colorful", "cinematic", "medical_illustration", "mixed"}:
+        raise ValueError("Unsupported visual generation style")
+    if foreground not in {"auto", "never", "only_approved", "prefer_when_clean"}:
+        raise ValueError("Unsupported foreground treatment")
+    if sfx not in {"off", "low", "medium", "high"}:
+        raise ValueError("Unsupported sound-effects density")
+    if captions not in {"off", "auto", "all"}:
+        raise ValueError("Unsupported caption mode")
+    if cleanup not in {"off", "conservative", "balanced", "tight"}:
+        raise ValueError("Unsupported dialogue cleanup mode")
+    layouts = payload.get("preferred_layouts") or [
+        "talking_head", "broll_top_speaker_bottom", "speaker_top_broll_bottom",
+        "speaker_left_broll_right", "broll_left_speaker_right", "picture_in_picture",
+        "floating_visual", "full_broll", "layered_foreground",
+    ]
+    valid_layouts = {
+        "talking_head", "broll_top_speaker_bottom", "speaker_top_broll_bottom",
+        "speaker_left_broll_right", "broll_left_speaker_right", "picture_in_picture",
+        "floating_visual", "full_broll", "layered_foreground",
+    }
+    layouts = [str(item) for item in layouts if str(item) in valid_layouts]
+    if not layouts:
+        raise ValueError("Select at least one preferred layout")
+    return {
+        "editing_profile": profile,
+        "editing_intensity": intensity,
+        "visual_generation_style": visual_style,
+        "foreground_treatment": foreground,
+        "sfx_density": sfx,
+        "captions_mode": captions,
+        "dialogue_cleanup_mode": cleanup,
+        "preferred_layouts": layouts,
+    }
 
 
 def _require_paid_confirmation(stage_numbers: list[int], confirmed: bool) -> None:
@@ -329,6 +477,7 @@ def _require_paid_confirmation(stage_numbers: list[int], confirmed: bool) -> Non
             detail=f"Explicit provider-usage confirmation is required for paid/usage stage(s): {labels}",
         )
 
+
 def _launch(run_id: str, worker_args: list[str]) -> None:
     _require_idle(run_id)
     paths = run_paths(run_id)
@@ -336,7 +485,13 @@ def _launch(run_id: str, worker_args: list[str]) -> None:
         raise HTTPException(status_code=404, detail="Run not found")
     log_handle = paths.log.open("a", encoding="utf-8")
     command = [PYTHON, "-m", "clinic_broll.worker", "--run-id", run_id, *worker_args]
-    process = subprocess.Popen(command, cwd=Path(__file__).resolve().parents[2], stdout=log_handle, stderr=subprocess.STDOUT, text=True)
+    process = subprocess.Popen(
+        command,
+        cwd=Path(__file__).resolve().parents[2],
+        stdout=log_handle,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
     with _process_lock:
         _processes[run_id] = process
     meta = load_run(run_id)
@@ -379,9 +534,16 @@ def _process_payload(run_id: str) -> dict[str, Any] | None:
 def _doctor_tools() -> dict[str, Any]:
     from shutil import which
 
+    sound_root = Path(os.getenv("SFX_LIBRARY_ROOT") or (Path(__file__).resolve().parents[3] / "ai_sound_effects_library"))
     return {
         "ffmpeg": bool(which(FFMPEG) or Path(FFMPEG).exists()),
         "ffprobe": bool(which(FFPROBE) or Path(FFPROBE).exists()),
-        "hyperframes": bool(which(HYPERFRAMES) or Path(HYPERFRAMES).exists() or (Path(__file__).resolve().parents[2] / "node_modules" / ".bin" / "hyperframes").exists()),
+        "hyperframes": bool(
+            which(HYPERFRAMES)
+            or Path(HYPERFRAMES).exists()
+            or (Path(__file__).resolve().parents[2] / "node_modules" / ".bin" / "hyperframes").exists()
+        ),
         "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY")),
+        "sound_library": (sound_root / "manifest.json").exists(),
+        "sound_library_root": str(sound_root),
     }

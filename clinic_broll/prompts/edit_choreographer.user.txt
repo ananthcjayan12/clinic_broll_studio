@@ -1,0 +1,15 @@
+Create deterministic edit choreography.
+
+EDITORIAL PLAN
+{editorial_plan}
+
+REFRAME ANALYSIS
+{reframe_plan}
+
+DIALOGUE CONTINUITY CUTS
+{continuity}
+
+SETTINGS
+{settings}
+
+Use only the published camera, transition, and emphasis presets. Use emphasis_punch primarily for hooks, warnings, key revelations, and strong recommendations. Use direct_cut when no transition is needed. Keep scales between 1.0 and 1.12 except an exceptional hook may reach 1.15.

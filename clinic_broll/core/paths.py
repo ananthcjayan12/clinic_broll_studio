@@ -30,8 +30,16 @@ class RunPaths:
         return self.root / "transcript"
 
     @property
+    def dialogue(self) -> Path:
+        return self.root / "dialogue"
+
+    @property
     def analysis(self) -> Path:
         return self.root / "analysis"
+
+    @property
+    def editorial(self) -> Path:
+        return self.root / "editorial"
 
     @property
     def plan(self) -> Path:
@@ -40,6 +48,10 @@ class RunPaths:
     @property
     def matte(self) -> Path:
         return self.root / "matte"
+
+    @property
+    def sound(self) -> Path:
+        return self.root / "sound"
 
     @property
     def assets(self) -> Path:
