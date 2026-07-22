@@ -1,0 +1,9 @@
+Review this complete edit manifest and measured findings.
+
+MANIFEST
+{manifest}
+
+MEASURED FINDINGS
+{technical_findings}
+
+Check for repetitive layouts, excessive punch-ins or transitions, eye-contact loss, high-risk matte use, artificial visual candidates, missing assets, sound cues that are too dense or loud, caption conflicts, and clinical publishing risks. Return pass, needs_review, or fail with actionable scene-specific findings.
