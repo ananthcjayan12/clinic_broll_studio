@@ -21,16 +21,30 @@ def run(run_id: str) -> dict[str, Any]:
     windows = visual.get("windows") or []
     for scene in editorial["scenes"]:
         midpoint = (float(scene["start"]) + float(scene["end"])) / 2
-        window = min(windows, key=lambda item: abs(float(item.get("start", 0)) + (float(item.get("end", 0)) - float(item.get("start", 0))) / 2 - midpoint)) if windows else {}
+        if windows:
+            window = min(
+                windows,
+                key=lambda item: abs(
+                    float(item.get("start", 0))
+                    + (float(item.get("end", 0)) - float(item.get("start", 0))) / 2
+                    - midpoint
+                ),
+            )
+        else:
+            window = {}
         preferred_side = str(window.get("negative_space") or "right")
         layout = str(scene.get("layout_variant") or "talking_head")
         if layout == "speaker_left_broll_right":
             speaker_region = "left"
         elif layout == "broll_left_speaker_right":
             speaker_region = "right"
+        elif layout == "broll_top_speaker_bottom":
+            speaker_region = "bottom"
+        elif layout == "speaker_top_broll_bottom":
+            speaker_region = "top"
         else:
-            speaker_region = "bottom" if layout == "broll_top_speaker_bottom" else ("top" if layout == "speaker_top_broll_bottom" else preferred_side)
-        cue = {
+            speaker_region = preferred_side
+        reframe_plan["scenes"].append({
             "scene_id": scene["scene_id"],
             "start": scene["start"],
             "end": scene["end"],
@@ -42,13 +56,17 @@ def run(run_id: str) -> dict[str, Any]:
             "negative_space": preferred_side,
             "hand_activity": window.get("hand_activity", 0.0),
             "matte_risk": window.get("matte_risk", 1.0),
-        }
-        reframe_plan["scenes"].append(cue)
+        })
     write_json(paths.editorial / "reframe-plan.json", reframe_plan)
 
     by_scene = {item["scene_id"]: item for item in reframe_plan["scenes"]}
     for slot in plan.get("slots", []):
         slot["reframe"] = by_scene.get(slot.get("scene_id"), {})
+        if slot.get("composition_mode") == "talking_head":
+            slot["layout_template"] = "talking_head"
+            slot["subject_mode"] = "original"
+            slot["keep_subject_foreground"] = False
+            continue
         risk = float(slot["reframe"].get("matte_risk", 1.0))
         treatment = str(meta["settings"].get("foreground_treatment") or "auto")
         if slot.get("subject_mode") == "matte_foreground" and (treatment == "never" or risk >= 0.35):
@@ -58,7 +76,7 @@ def run(run_id: str) -> dict[str, Any]:
             if slot.get("layout_variant") == "layered_foreground":
                 slot["layout_variant"] = "broll_top_speaker_bottom"
                 slot["layout_template"] = "split_top"
-            slot.setdefault("safety", []).append("Matte automatically disabled because the local edge-risk score was high")
+            slot.setdefault("safety", []).append("Foreground treatment changed to a crop-based split because edge risk was high")
     write_json(paths.plan / "broll_plan.json", plan)
 
     artifacts = ["editorial/reframe-plan.json", "plan/broll_plan.json"]
@@ -68,7 +86,7 @@ def run(run_id: str) -> dict[str, Any]:
         matte_result = matte.run(run_id)
         artifacts.extend(matte_result.get("artifacts", []))
     else:
-        append_log(paths, "Preparation: no foreground matte required; modern split/PIP layouts will use the original video")
+        append_log(paths, "Preparation: no foreground matte required; split and picture-in-picture layouts use the original video")
     return {
         "artifacts": artifacts,
         "summary": {
