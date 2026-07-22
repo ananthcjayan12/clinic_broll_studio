@@ -1,5 +1,9 @@
-Create the still-image prompt for this approved slot:
+Create the still-image prompt for this approved V2 scene:
 {slot}
 
+RUN-LEVEL VISUAL BIBLE
+{visual_bible}
+
 Canvas: {width}x{height}, aspect ratio {aspect_ratio}.
-The subject cutout may remain in front of the panel, so preserve useful negative space in the requested panel region. Do not include written text inside the generated image; UI text is rendered locally.
+
+Explicitly describe subject, environment, camera/lens, composition, lighting, palette, real material texture, one visually interesting detail, and motion potential. Compose for the requested top/bottom, side split, picture-in-picture, full-B-roll, floating visual, or layered-foreground layout. Preserve useful negative space only where the layout needs it. Do not include written text, watermark, logo, UI, fake captions, or the real doctor's face inside generated media; all text and the original speaker video are rendered locally.
