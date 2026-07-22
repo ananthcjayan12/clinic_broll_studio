@@ -24,6 +24,7 @@ COMPOSITION_MODES = {
     "picture_in_picture", "graphic_scene", "comparison", "montage",
 }
 SUBJECT_MODES = {"original", "cropped_original", "matte_foreground", "picture_in_picture", "hidden"}
+VISUAL_STRATEGIES = {"none", "generated_photo", "dental_diagram", "editorial_graphic"}
 CAPTION_POSITIONS = {"auto", "top", "bottom"}
 CAMERA_MOVES = {"static", "subtle_punch_in", "emphasis_punch", "slow_push", "micro_pull_back", "face_follow", "object_follow"}
 TRANSITIONS = {"direct_cut", "soft_crossfade", "clean_push", "vertical_slide", "horizontal_swipe", "mask_reveal", "paper_reveal", "zoom_match", "blur_transition", "dip_to_white"}
@@ -50,7 +51,6 @@ LAYOUT_TO_VARIANT.update({
 def run(run_id: str) -> dict[str, Any]:
     """Backward-compatible entry point; V2 planning is performed by the Editorial Director."""
     from .editorial import run as run_editorial
-
     return run_editorial(run_id)
 
 
@@ -78,6 +78,9 @@ def normalize_plan(payload: dict[str, Any], duration: float, *, fps: int = 30) -
         subject = str(raw.get("subject_mode") or _subject_from_variant(variant))
         if subject not in SUBJECT_MODES:
             subject = _subject_from_variant(variant)
+        strategy = str(raw.get("visual_strategy") or ("none" if composition == "talking_head" else "generated_photo"))
+        if strategy not in VISUAL_STRATEGIES:
+            strategy = "generated_photo"
         broll_only = layout == "broll_only" or variant == "full_broll"
         caption_position = str(raw.get("caption_position") or "auto")
         if caption_position not in CAPTION_POSITIONS:
@@ -100,6 +103,9 @@ def normalize_plan(payload: dict[str, Any], duration: float, *, fps: int = 30) -
             "layout_template": layout,
             "visual_type": str(raw.get("visual_type") or raw.get("visual_style") or "natural_lifestyle"),
             "visual_style": str(raw.get("visual_style") or raw.get("visual_type") or "natural_lifestyle"),
+            "visual_strategy": strategy,
+            "provider_usage": strategy == "generated_photo",
+            "operator_visible": bool(raw.get("operator_visible", True)),
             "keep_subject_foreground": False if broll_only else bool(raw.get("keep_subject_foreground", subject == "matte_foreground")),
             "panel_region": 1.0 if broll_only else max(0.25, min(float(raw.get("panel_region", 0.44)), 0.72)),
             "show_caption": bool(raw.get("show_caption", False)),
@@ -115,19 +121,20 @@ def normalize_plan(payload: dict[str, Any], duration: float, *, fps: int = 30) -
             "reframe": dict(raw.get("reframe") or {}),
             "visual_bible": dict(raw.get("visual_bible") or {}),
             "safety": list(raw.get("safety") or ["No text in generated media", "No distorted dental anatomy"]),
-            "status": "suggested",
+            "status": "talking_head" if strategy == "none" else "suggested",
             "selected_still": None,
             "selected_motion": None,
             "candidate_review": None,
             "versions": {"stills": [], "motion": []},
-            "review": {"plan": None, "still": None, "motion": None},
+            "review": {"plan": "keep_talking_head" if strategy == "none" else None, "still": None, "motion": None},
         })
         previous_end = end
     return {
-        "version": "2.0",
+        "version": "2.1",
         "summary": str(payload.get("summary") or "B-roll compatibility plan"),
         "fps": fps,
         "duration_seconds": duration,
+        "budget_report": dict(payload.get("budget_report") or {}),
         "slots": slots,
     }
 
@@ -142,10 +149,10 @@ def update_slot(run_id: str, slot_id: str, updates: dict[str, Any]) -> dict[str,
         raise KeyError(slot_id)
     allowed = {
         "start", "end", "purpose", "composition_mode", "layout_variant", "subject_mode",
-        "layout_template", "visual_type", "visual_style", "keep_subject_foreground",
+        "layout_template", "visual_type", "visual_style", "visual_strategy", "keep_subject_foreground",
         "panel_region", "show_caption", "caption_position", "still_brief", "motion_brief",
         "text_overlay", "camera_move", "transition_in", "transition_out", "emphasis_preset",
-        "sound_intent", "safety", "reframe",
+        "sound_intent", "safety", "reframe", "operator_visible",
     }
     for key, value in updates.items():
         if key in allowed:
@@ -158,10 +165,19 @@ def update_slot(run_id: str, slot_id: str, updates: dict[str, Any]) -> dict[str,
         start, end = min(start, total_duration), min(end, total_duration)
     if end - start < 0.5:
         raise ValueError("A scene must be at least 0.5 seconds")
+    strategy = str(slot.get("visual_strategy") or "generated_photo")
+    if strategy not in VISUAL_STRATEGIES:
+        raise ValueError("Unknown visual strategy")
     variant = str(slot.get("layout_variant") or LAYOUT_TO_VARIANT.get(str(slot.get("layout_template")), "layered_foreground"))
+    if strategy == "none":
+        variant = "talking_head"
+        slot["composition_mode"] = "talking_head"
+        slot["subject_mode"] = "original"
     if variant not in LAYOUT_VARIANTS:
         raise ValueError("Unknown layout variant")
     layout = str(slot.get("layout_template") or VARIANT_TO_LAYOUT[variant])
+    if strategy == "none":
+        layout = "full_frame"
     if layout not in LAYOUTS:
         raise ValueError("Unknown layout template")
     composition = str(slot.get("composition_mode") or _composition_from_variant(variant))
@@ -178,6 +194,10 @@ def update_slot(run_id: str, slot_id: str, updates: dict[str, Any]) -> dict[str,
         layout, composition, subject = "broll_only", "full_broll", "hidden"
         slot["panel_region"] = 1.0
         slot["keep_subject_foreground"] = False
+    elif strategy == "none":
+        layout, composition, subject = "full_frame", "talking_head", "original"
+        slot["panel_region"] = 1.0
+        slot["keep_subject_foreground"] = False
     else:
         slot["panel_region"] = max(0.25, min(float(slot.get("panel_region", 0.44)), 1.0))
         slot["keep_subject_foreground"] = subject == "matte_foreground"
@@ -191,8 +211,13 @@ def update_slot(run_id: str, slot_id: str, updates: dict[str, Any]) -> dict[str,
         "start_frame": round(start * fps), "end_frame": round(end * fps),
         "layout_variant": variant, "layout_template": layout,
         "composition_mode": composition, "subject_mode": subject,
+        "visual_strategy": strategy, "provider_usage": strategy == "generated_photo",
         "show_caption": bool(slot.get("show_caption", False)),
     })
+    if strategy == "none":
+        slot["status"] = "talking_head"
+        slot["selected_still"] = None
+        slot["selected_motion"] = None
     write_json(paths.plan / "broll_plan.json", plan)
     _sync_editorial_scene(paths, slot)
     return slot
@@ -226,6 +251,12 @@ def slot_action(run_id: str, slot_id: str, action: str) -> dict[str, Any]:
     if action in {"reject", "keep_talking_head"}:
         slot["selected_still"] = None
         slot["selected_motion"] = None
+        if action == "keep_talking_head":
+            slot.update({
+                "visual_strategy": "none", "provider_usage": False,
+                "composition_mode": "talking_head", "layout_variant": "talking_head",
+                "layout_template": "full_frame", "subject_mode": "original",
+            })
     if action == "approve_still":
         versions = (slot.get("versions") or {}).get("stills") or []
         if not versions:
@@ -239,6 +270,7 @@ def slot_action(run_id: str, slot_id: str, action: str) -> dict[str, Any]:
     if action == "use_still_only":
         slot["selected_motion"] = None
     write_json(paths.plan / "broll_plan.json", plan)
+    _sync_editorial_scene(paths, slot)
     return slot
 
 
@@ -261,7 +293,7 @@ def refine_slot(run_id: str, slot_id: str, instruction: str = "") -> dict[str, A
         slot=json.dumps(slot, ensure_ascii=False, indent=2),
         phrases=json.dumps(nearby_phrases, ensure_ascii=False, indent=2),
         visual_windows=json.dumps(nearby_windows, ensure_ascii=False, indent=2),
-        instruction=instruction.strip() or "Improve the modern composition, natural visual direction, and generation reliability without changing clinical meaning.",
+        instruction=instruction.strip() or "Improve this restrained beat without increasing B-roll density or changing clinical meaning.",
     )
     payload = call_task_json(task="slot_refinement", selection=selection, system=system, user=user, cwd=paths.root, output_schema=load_schema("slot_refinement.schema.json"))
     response_dir = paths.responses / "editorial" / "refinements"
@@ -284,9 +316,10 @@ def _sync_editorial_scene(paths, slot: dict[str, Any]) -> None:
     mapping = {
         "start": "start", "end": "end", "duration": "duration", "purpose": "editorial_purpose",
         "composition_mode": "composition_mode", "layout_variant": "layout_variant", "subject_mode": "subject_mode",
-        "visual_style": "visual_style", "still_brief": "visual_brief", "motion_brief": "motion_brief",
+        "visual_style": "visual_style", "visual_strategy": "visual_strategy", "still_brief": "visual_brief", "motion_brief": "motion_brief",
         "text_overlay": "text_overlay", "camera_move": "camera_move", "transition_in": "transition_in",
         "transition_out": "transition_out", "emphasis_preset": "emphasis_preset", "sound_intent": "sound_intent",
+        "operator_visible": "operator_visible",
     }
     for source, target in mapping.items():
         if source in slot:
@@ -296,6 +329,8 @@ def _sync_editorial_scene(paths, slot: dict[str, Any]) -> None:
 
 def _review_selected(slot: dict[str, Any], fallback: str) -> str:
     review = slot.get("candidate_review") or {}
+    if review.get("decision") == "reject_all":
+        raise RuntimeError("All generated candidates were rejected. Change the visual treatment or generate a new candidate before approval.")
     selected = str(review.get("selected_path") or "")
     return selected or fallback
 
