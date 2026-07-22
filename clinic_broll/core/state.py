@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 from .config import DEFAULT_FPS, DEFAULT_HEIGHT, DEFAULT_WIDTH
@@ -25,15 +26,17 @@ STAGES: tuple[Stage, ...] = (
     Stage(2, "transcribe", "Malayalam transcription", paid=True),
     Stage(3, "dialogue_analysis", "Dialogue cleanup analysis", paid=True, human_gate=True),
     Stage(4, "clean_master", "Clean master & continuity"),
-    Stage(5, "analyze", "Local video analysis"),
-    Stage(6, "plan", "B-roll planning", paid=True, human_gate=True),
-    Stage(7, "matte", "Foreground subject matte"),
-    Stage(8, "stills", "Generate still candidates", paid=True),
-    Stage(9, "still_preview", "Still preview", human_gate=True),
-    Stage(10, "motion", "Generate approved motion", paid=True),
-    Stage(11, "motion_preview", "Motion preview", human_gate=True),
-    Stage(12, "render", "Final render"),
-    Stage(13, "qa", "Final QA", paid=True),
+    Stage(5, "analyze", "Visual, face & gesture analysis"),
+    Stage(6, "editorial", "Editorial direction & visual bible", paid=True, human_gate=True),
+    Stage(7, "preparation", "Optional matte & face-aware reframe"),
+    Stage(8, "visual_candidates", "Generate natural visual candidates", paid=True),
+    Stage(9, "visual_preview", "Visual candidate preview", human_gate=True),
+    Stage(10, "motion", "Generate approved motion assets", paid=True),
+    Stage(11, "choreography", "Edit choreography, zooms & transitions", paid=True),
+    Stage(12, "sound", "Sound-effects direction & mix", paid=True),
+    Stage(13, "complete_preview", "Complete edit preview", human_gate=True),
+    Stage(14, "render", "Final render"),
+    Stage(15, "qa", "Visual, edit, audio & clinical QA", paid=True),
 )
 STAGE_BY_NUMBER = {item.number: item for item in STAGES}
 STAGE_BY_KEY = {item.key: item for item in STAGES}
@@ -47,24 +50,21 @@ STAGE_OUTPUTS: dict[int, tuple[str, ...]] = {
     2: ("transcript", "dialogue/source-transcript.json", "dialogue/source-captions.srt"),
     3: ("dialogue/edit-plan.json", "prompts/dialogue", "responses/dialogue"),
     4: (
-        "dialogue/source-to-clean-map.json",
-        "dialogue/continuity-plan.json",
-        "source/master.mp4",
-        "source/proxy.mp4",
-        "source/speech.wav",
-        "source/metadata.json",
-        "transcript/transcript.json",
-        "transcript/captions.srt",
+        "dialogue/source-to-clean-map.json", "dialogue/continuity-plan.json",
+        "source/master.mp4", "source/proxy.mp4", "source/speech.wav", "source/metadata.json",
+        "transcript/transcript.json", "transcript/captions.srt",
     ),
     5: ("analysis",),
-    6: ("plan",),
-    7: ("matte",),
+    6: ("editorial", "plan/broll_plan.json", "prompts/editorial", "responses/editorial"),
+    7: ("matte", "editorial/reframe-plan.json"),
     8: ("assets/stills", "prompts/stills", "responses/stills"),
     9: ("compositions/still", "previews/still-preview.mp4"),
     10: ("assets/motion", "prompts/motion", "responses/motion"),
-    11: ("compositions/motion", "previews/motion-preview.mp4"),
-    12: ("compositions/final", "renders/final.mp4"),
-    13: ("qa",),
+    11: ("editorial/edit-choreography.json", "prompts/choreography", "responses/choreography"),
+    12: ("sound", "prompts/sound", "responses/sound"),
+    13: ("compositions/complete", "previews/complete-preview.mp4"),
+    14: ("compositions/final", "renders/final.mp4"),
+    15: ("qa",),
 }
 
 
@@ -101,10 +101,20 @@ def create_run(
         "asr_provider": "elevenlabs",
         "matting_provider": "mediapipe",
         "media_provider": "grok_cli",
-        "image_candidates_per_slot": 1,
+        "image_candidates_per_slot": 2,
         "captions_mode": "off",
         "dialogue_cleanup_mode": "balanced",
         "dialogue_crossfade_ms": 25,
+        "editing_profile": "modern_tech_explainer",
+        "editing_intensity": "medium",
+        "visual_generation_style": "natural_colorful",
+        "foreground_treatment": "auto",
+        "sfx_density": "medium",
+        "preferred_layouts": [
+            "talking_head", "broll_top_speaker_bottom", "speaker_top_broll_bottom",
+            "speaker_left_broll_right", "broll_left_speaker_right", "picture_in_picture",
+            "floating_visual", "full_broll", "layered_foreground",
+        ],
         "matte_feather_px": 4,
         "matte_temporal_blend": 0.12,
         "matte_decontamination_strength": 0.72,
@@ -115,7 +125,7 @@ def create_run(
         resolved.update(settings)
     resolved["task_models"] = validate_model_map(resolved.get("task_models"))
     meta = {
-        "version": "1.2",
+        "version": "2.0",
         "run_id": run_id,
         "created_at": now_iso(),
         "updated_at": now_iso(),
@@ -123,11 +133,17 @@ def create_run(
         "settings": resolved,
         "stages": [_empty_stage(stage) for stage in STAGES],
         "active_process": None,
-        "approvals": {"dialogue": False, "plan": False, "stills": False, "motion": False, "final": False},
+        "approvals": {
+            "dialogue": False,
+            "editorial": False,
+            "stills": False,
+            "complete_preview": False,
+            "final": False,
+        },
         "notes": [],
     }
     write_json(paths.meta, meta)
-    append_log(paths, "Run created")
+    append_log(paths, "V2 run created")
     return meta
 
 
@@ -138,14 +154,27 @@ def load_run(run_id: str) -> dict[str, Any]:
         raise FileNotFoundError(f"Unknown run: {run_id}")
     if _migrate_meta(meta):
         write_json(paths.meta, meta)
-        append_log(paths, "Run metadata migrated to dialogue-cleanup pipeline v1.2")
+        append_log(paths, "Run metadata migrated to unified editor-director pipeline v2.0")
     return meta
 
 
 def _migrate_meta(meta: dict[str, Any]) -> bool:
     changed = False
     settings = meta.setdefault("settings", {})
-    defaults = {"dialogue_cleanup_mode": "balanced", "dialogue_crossfade_ms": 25}
+    defaults = {
+        "dialogue_cleanup_mode": "balanced",
+        "dialogue_crossfade_ms": 25,
+        "editing_profile": "modern_tech_explainer",
+        "editing_intensity": "medium",
+        "visual_generation_style": "natural_colorful",
+        "foreground_treatment": "auto",
+        "sfx_density": "medium",
+        "preferred_layouts": [
+            "talking_head", "broll_top_speaker_bottom", "speaker_top_broll_bottom",
+            "speaker_left_broll_right", "broll_left_speaker_right", "picture_in_picture",
+            "floating_visual", "full_broll", "layered_foreground",
+        ],
+    }
     for key, value in defaults.items():
         if key not in settings:
             settings[key] = value
@@ -159,10 +188,11 @@ def _migrate_meta(meta: dict[str, Any]) -> bool:
     desired_keys = [stage.key for stage in STAGES]
     if current_keys != desired_keys:
         existing = {str(item.get("key")): item for item in meta.get("stages", [])}
-        rebuilt = []
-        has_dialogue = "dialogue_analysis" in existing
+        rebuilt: list[dict[str, Any]] = []
+        # Preserve source, transcript, dialogue cleanup, clean master and local analysis.
+        preserve = {"ingest", "transcribe", "dialogue_analysis", "clean_master", "analyze"}
         for stage in STAGES:
-            if stage.key in existing and (has_dialogue or stage.number <= 2):
+            if stage.key in existing and stage.key in preserve:
                 old = existing[stage.key]
                 record = _empty_stage(stage)
                 record.update({key: old.get(key) for key in ("status", "started_at", "completed_at", "error", "artifacts")})
@@ -172,12 +202,18 @@ def _migrate_meta(meta: dict[str, Any]) -> bool:
             rebuilt.append(record)
         meta["stages"] = rebuilt
         changed = True
+
     approvals = meta.setdefault("approvals", {})
-    if "dialogue" not in approvals:
-        approvals["dialogue"] = False
-        changed = True
-    if meta.get("version") != "1.2":
-        meta["version"] = "1.2"
+    for key in ("dialogue", "editorial", "stills", "complete_preview", "final"):
+        if key not in approvals:
+            approvals[key] = False
+            changed = True
+    for obsolete in ("plan", "motion"):
+        if obsolete in approvals:
+            approvals.pop(obsolete, None)
+            changed = True
+    if meta.get("version") != "2.0":
+        meta["version"] = "2.0"
         changed = True
     return changed
 
@@ -232,10 +268,13 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
     history_root = paths.history / f"rewind-from-{from_stage}-{stamp}"
     history_root.mkdir(parents=True, exist_ok=True)
     write_json(history_root / "studio_run.before.json", meta)
-    plan_path = paths.plan / "broll_plan.json"
-    plan = read_json(plan_path)
-    if plan:
-        write_json(history_root / "broll_plan.before.json", plan)
+    for relative in (
+        "plan/broll_plan.json", "editorial/editorial-plan.json", "editorial/visual-bible.json",
+        "editorial/edit-choreography.json", "sound/sound-plan.json",
+    ):
+        payload = read_json(paths.root / relative)
+        if payload:
+            write_json(history_root / (Path(relative).name + ".before.json"), payload)
 
     for number in range(from_stage, max(STAGE_BY_NUMBER) + 1):
         for relative in STAGE_OUTPUTS.get(number, ()):
@@ -243,36 +282,17 @@ def rewind_run(run_id: str, from_stage: int) -> dict[str, Any]:
         record = stage_record(meta, number)
         record.update({"status": "pending", "started_at": None, "completed_at": None, "error": None, "artifacts": []})
 
-    if plan and from_stage > 6:
-        for slot in plan.get("slots", []):
-            if from_stage <= 8:
-                slot.setdefault("versions", {})["stills"] = []
-                slot.setdefault("versions", {})["motion"] = []
-                slot["selected_still"] = None
-                slot["selected_motion"] = None
-                if slot.get("status") not in {"rejected", "talking_head", "suggested"}:
-                    slot["status"] = "plan_approved"
-                slot.setdefault("review", {})["still"] = None
-                slot.setdefault("review", {})["motion"] = None
-            elif from_stage <= 10:
-                slot.setdefault("versions", {})["motion"] = []
-                slot["selected_motion"] = None
-                if slot.get("selected_still") and slot.get("status") not in {"rejected", "talking_head"}:
-                    slot["status"] = "still_approved"
-                slot.setdefault("review", {})["motion"] = None
-        write_json(plan_path, plan)
-
     if from_stage <= 3:
         meta["approvals"]["dialogue"] = False
     if from_stage <= 6:
-        meta["approvals"]["plan"] = False
+        meta["approvals"]["editorial"] = False
     if from_stage <= 8:
         meta["approvals"]["stills"] = False
-    if from_stage <= 10:
-        meta["approvals"]["motion"] = False
-    if from_stage <= 12:
+    if from_stage <= 13:
+        meta["approvals"]["complete_preview"] = False
+    if from_stage <= 14:
         meta["approvals"]["final"] = False
-    append_log(paths, f"Rewound from stage {from_stage}; previous artifacts saved in {history_root.name}")
+    append_log(paths, f"Rewound from V2 stage {from_stage}; prior artifacts saved in {history_root.name}")
     save_run(meta)
     return meta
 
@@ -288,17 +308,14 @@ def list_runs() -> list[dict[str, Any]]:
             if not meta:
                 continue
             _migrate_meta(meta)
-            current = next_incomplete(meta)
-            results.append(
-                {
-                    "run_id": meta["run_id"],
-                    "created_at": meta.get("created_at"),
-                    "updated_at": meta.get("updated_at"),
-                    "source_filename": meta.get("source_filename"),
-                    "next_stage": current,
-                    "final_ready": (meta_path.parent / "renders" / "final.mp4").exists(),
-                }
-            )
+            results.append({
+                "run_id": meta["run_id"],
+                "created_at": meta.get("created_at"),
+                "updated_at": meta.get("updated_at"),
+                "source_filename": meta.get("source_filename"),
+                "next_stage": next_incomplete(meta),
+                "final_ready": (meta_path.parent / "renders" / "final.mp4").exists(),
+            })
         except Exception:
             continue
     return sorted(results, key=lambda item: item.get("updated_at") or "", reverse=True)
@@ -309,20 +326,37 @@ def public_run_detail(run_id: str) -> dict[str, Any]:
     meta = load_run(run_id)
     plan = read_json(paths.plan / "broll_plan.json", {"slots": []}) or {"slots": []}
     transcript = read_json(paths.transcript / "transcript.json", {}) or {}
+    editorial = read_json(paths.editorial / "editorial-plan.json", {}) or {}
+    visual_bible = read_json(paths.editorial / "visual-bible.json", {}) or {}
+    choreography = read_json(paths.editorial / "edit-choreography.json", {}) or {}
+    sound_plan = read_json(paths.sound / "sound-plan.json", {}) or {}
     artifacts = {
         "source_proxy": _url_if_exists(run_id, paths.source / "proxy.mp4"),
         "still_preview": _url_if_exists(run_id, paths.previews / "still-preview.mp4"),
-        "motion_preview": _url_if_exists(run_id, paths.previews / "motion-preview.mp4"),
+        "complete_preview": _url_if_exists(run_id, paths.previews / "complete-preview.mp4"),
         "final_video": _url_if_exists(run_id, paths.renders / "final.mp4"),
         "still_composition": _url_if_exists(run_id, paths.compositions / "still" / "index.html"),
-        "motion_composition": _url_if_exists(run_id, paths.compositions / "motion" / "index.html"),
+        "complete_composition": _url_if_exists(run_id, paths.compositions / "complete" / "index.html"),
         "final_composition": _url_if_exists(run_id, paths.compositions / "final" / "index.html"),
         "contact_sheet": _url_if_exists(run_id, paths.analysis / "contact-sheet.jpg"),
+        "clean_preview": _url_if_exists(run_id, paths.dialogue / "clean-preview.mp4"),
+        "timeline_map": _url_if_exists(run_id, paths.dialogue / "source-to-clean-map.json"),
+        "sound_mix": _url_if_exists(run_id, paths.sound / "final-audio.wav"),
     }
-    return {**meta, "plan": plan, "transcript": transcript, "artifacts": artifacts, "usage": usage_summary(paths.root)}
+    return {
+        **meta,
+        "plan": plan,
+        "transcript": transcript,
+        "editorial": editorial,
+        "visual_bible": visual_bible,
+        "choreography": choreography,
+        "sound_plan": sound_plan,
+        "artifacts": artifacts,
+        "usage": usage_summary(paths.root),
+    }
 
 
-def _url_if_exists(run_id: str, path) -> str | None:
+def _url_if_exists(run_id: str, path: Path) -> str | None:
     if not path.exists():
         return None
     relative = path.relative_to(run_paths(run_id).root).as_posix()
