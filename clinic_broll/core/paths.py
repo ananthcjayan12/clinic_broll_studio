@@ -30,6 +30,10 @@ class RunPaths:
         return self.root / "transcript"
 
     @property
+    def dialogue(self) -> Path:
+        return self.root / "dialogue"
+
+    @property
     def analysis(self) -> Path:
         return self.root / "analysis"
 
