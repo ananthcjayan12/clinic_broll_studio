@@ -1,0 +1,12 @@
+Create an Omni-first edit plan for this cleaned presenter video.
+
+SETTINGS
+{settings}
+
+WORD/PRASE-LEVEL TRANSCRIPT
+{transcript}
+
+FACE, GESTURE AND CUT-SUITABILITY ANALYSIS
+{visual_analysis}
+
+Return only the designed segments. Local code will preserve the original video in all timeline gaps and enforce the credit limit.

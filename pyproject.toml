@@ -28,6 +28,7 @@ dev = ["pytest>=8.3,<10", "ruff>=0.8,<1"]
 
 [project.scripts]
 clinic-broll = "clinic_broll.cli:main"
+clinic-omni = "clinic_broll.omni_v3.server:main"
 
 [tool.setuptools.packages.find]
 include = ["clinic_broll*"]
@@ -47,4 +48,5 @@ clinic_broll = [
   "prompts/*.txt",
   "schemas/*.json",
   "studio/static/*",
+  "omni_v3/static/*",
 ]
