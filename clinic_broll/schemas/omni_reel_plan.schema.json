@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["summary", "segments"],
+  "properties": {
+    "summary": {"type": "string"},
+    "segments": {
+      "type": "array",
+      "maxItems": 12,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["start", "end", "treatment", "purpose", "visual_concept", "prompt"],
+        "properties": {
+          "start": {"type": "number", "minimum": 0},
+          "end": {"type": "number", "minimum": 0},
+          "treatment": {
+            "type": "string",
+            "enum": ["original", "omni_presenter_edit", "omni_broll", "omni_transition"]
+          },
+          "purpose": {"type": "string"},
+          "visual_concept": {"type": "string"},
+          "prompt": {"type": "string"},
+          "transition_strategy": {"type": "string"},
+          "priority": {"type": "string", "enum": ["essential", "useful", "optional"]}
+        }
+      }
+    }
+  }
+}
